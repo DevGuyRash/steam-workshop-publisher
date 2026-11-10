@@ -1,0 +1,73 @@
+name: Publish Workshop item
+run-name: ${{ inputs.publish && 'Publish' || 'Validate' }} ${{ inputs.mod }} ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      mod:
+        description: Approved key from mods.json
+        required: true
+        default: automindful
+        type: string
+      tag:
+        description: Latest stable GitHub release tag, such as v0.1.1
+        required: true
+        type: string
+      publish:
+        description: Upload the checked release to Steam Workshop
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: steam-workshop-session
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      WORKSHOP_MAX_BYTES: ${{ vars.WORKSHOP_MAX_BYTES || '1073741824' }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Check and stage the approved release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RELEASES_TOKEN: ${{ secrets.SOURCE_RELEASES_TOKEN }}
+          MOD: ${{ inputs.mod }}
+          TAG: ${{ inputs.tag }}
+        run: python3 publisher.py prepare --mod "$MOD" --tag "$TAG" --out "$RUNNER_TEMP/stage"
+      - name: Install publishing dependencies
+        if: inputs.publish
+        run: sudo apt-get update -qq && sudo apt-get install -y age lib32gcc-s1
+      - name: Restore the encrypted SteamCMD session
+        id: restore
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STEAM_SESSION_KEY: ${{ secrets.STEAM_SESSION_KEY }}
+        run: python3 session.py restore --root "$RUNNER_TEMP/steamcmd"
+      - name: Update the existing Workshop item
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RELEASES_TOKEN: ${{ secrets.SOURCE_RELEASES_TOKEN }}
+          STEAM_USERNAME: ${{ vars.STEAM_USERNAME }}
+        run: python3 publisher.py upload --stage "$RUNNER_TEMP/stage" --steamcmd-dir "$RUNNER_TEMP/steamcmd" --username "$STEAM_USERNAME"
+      - name: Preserve the refreshed session after either upload result
+        if: always() && inputs.publish && steps.restore.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STEAM_SESSION_KEY: ${{ secrets.STEAM_SESSION_KEY }}
+        run: python3 session.py save --root "$RUNNER_TEMP/steamcmd"
+      - name: Remove temporary publishing state
+        if: always()
+        run: python3 session.py clean --root "$RUNNER_TEMP/steamcmd" --stage "$RUNNER_TEMP/stage"
