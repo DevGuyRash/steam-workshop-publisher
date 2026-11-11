@@ -155,6 +155,7 @@ def login(root: Path, repo: str | None, github: bool) -> None:
         repo = publisher_repository(repo)
     print("Steam Workshop sign-in", flush=True)
     print("Use the Steam account that owns your Workshop items. GitHub credentials are not used here.", flush=True)
+    print("SteamCMD opens a separate Steam login and may replace another Steam client or game session on this account.", flush=True)
     username = steam_username(input("Steam account login username (used to sign in to Steam): ").strip())
     install(root)
     environment = dict(os.environ, HOME=str(root))
