@@ -12,7 +12,6 @@ import urllib.request
 import json
 import uuid
 
-REPOSITORY = "DevGuyRash/steam-workshop-publisher"
 STATE_TAG = "steam-session"
 LOCAL_ROOT = Path.home() / ".local/share/steam-workshop-publisher/steamcmd"
 MAX_STATE_BYTES = 8 * 1024 * 1024
@@ -20,6 +19,16 @@ MAX_STATE_BYTES = 8 * 1024 * 1024
 
 def command(arguments, **kwargs):
     return subprocess.run(arguments, check=True, timeout=180, **kwargs)
+
+
+def publisher_repository(explicit: str | None = None) -> str:
+    repository = explicit or os.environ.get("GITHUB_REPOSITORY")
+    if not repository:
+        repository = command(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+                             cwd=Path(__file__).resolve().parent, capture_output=True, text=True).stdout.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        raise ValueError("Choose the publisher repository as owner/name")
+    return repository
 
 
 def install(root: Path) -> None:
@@ -119,7 +128,9 @@ def restore(root: Path, key_file: Path, repo: str) -> None:
         unpack(work / "session.tar", root)
 
 
-def login(root: Path, repo: str, github: bool) -> None:
+def login(root: Path, repo: str | None, github: bool) -> None:
+    if github:
+        repo = publisher_repository(repo)
     username = input("Steam account name that owns the Workshop items: ").strip()
     if not re.fullmatch(r"[A-Za-z0-9_@.\-]{1,64}", username):
         raise ValueError("Invalid Steam account name")
@@ -152,7 +163,7 @@ def main() -> None:
     parser.add_argument("action", choices=["login", "restore", "save", "clean"])
     parser.add_argument("--root", type=Path, default=LOCAL_ROOT)
     parser.add_argument("--stage", type=Path)
-    parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", REPOSITORY))
+    parser.add_argument("--repo")
     parser.add_argument("--github", action="store_true")
     args = parser.parse_args()
     if args.action == "login":
@@ -175,9 +186,9 @@ def main() -> None:
         key_file.touch(mode=0o600)
         key_file.write_text(key)
         if args.action == "restore":
-            restore(args.root.resolve(), key_file, args.repo)
+            restore(args.root.resolve(), key_file, publisher_repository(args.repo))
         else:
-            save(args.root.resolve(), key_file, args.repo)
+            save(args.root.resolve(), key_file, publisher_repository(args.repo))
 
 
 if __name__ == "__main__":
