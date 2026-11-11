@@ -31,22 +31,21 @@ class SetupTools(unittest.TestCase):
             self.assertEqual(manifest["archiveSha256"], hashlib.sha256(archive.read_bytes()).hexdigest())
             self.assertEqual((output / "release-notes.txt").read_text(), "Release v1.2.3\n")
 
-    def test_registration_is_repeatable_and_does_not_overwrite_another_item(self):
+    def test_mod_configuration_is_repeatable_and_does_not_overwrite_another_item(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for name in ("register.py", "publisher.py"):
+            for name in ("init_config.py", "publisher.py"):
                 shutil.copyfile(ROOT / name, root / name)
-            (root / "mods.json").write_text("{}\n")
-            arguments = [sys.executable, str(root / "register.py"), "example", "owner/repo", "Example", "1234", "440"]
+            arguments = [sys.executable, str(root / "init_config.py"), str(root), "Example", "1234", "440"]
             for _ in range(2):
                 result = subprocess.run(arguments, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            expected = {"example": {"source": "owner/repo", "mod_id": "Example", "item_id": "1234", "app_id": "440", "archive": "Example-{version}.zip"}}
-            self.assertEqual(json.loads((root / "mods.json").read_text()), expected)
+            expected = {"mod_id": "Example", "item_id": "1234", "app_id": "440", "archive": "Example-{version}.zip"}
+            self.assertEqual(json.loads((root / "workshop-publisher.json").read_text()), expected)
             arguments[-2] = "9999"
             result = subprocess.run(arguments, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(json.loads((root / "mods.json").read_text()), expected)
+            self.assertEqual(json.loads((root / "workshop-publisher.json").read_text()), expected)
 
 
 if __name__ == "__main__":
