@@ -11,6 +11,7 @@ import signal
 import stat
 import subprocess
 import tempfile
+import time
 import zipfile
 
 ROOT = Path(__file__).resolve().parent
@@ -236,31 +237,61 @@ def send_to_steam(vdf_path: Path, item_id: str, steamcmd_dir: Path, username: st
     env = {key: value for key, value in os.environ.items()
            if key not in {"GH_TOKEN", "GITHUB_TOKEN", "SOURCE_RELEASES_TOKEN", "STEAM_SESSION_KEY"}}
     env["HOME"] = str(launcher.parent)
-    with tempfile.TemporaryFile(mode="w+b") as log:
-        try:
-            process = subprocess.Popen([str(launcher), "+@ShutdownOnFailedCommand", "1", "+@NoPromptForPassword", "1",
-                "+login", username, "+workshop_build_item", str(vdf_path.absolute()), "+quit"],
-                cwd=launcher.parent, env=env, stdin=subprocess.DEVNULL, stdout=log,
-                stderr=subprocess.STDOUT, start_new_session=True)
+    # The supported SteamCMD launcher is POSIX/Linux. Record cancellation rather
+    # than raising inside Popen, so a signal cannot lose an already-spawned child.
+    cancelled = None
+    previous = {}
+    process = None
+
+    def cancel(signum, _frame):
+        nonlocal cancelled
+        if cancelled is None:
+            cancelled = signum
+
+    try:
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            previous[signum] = signal.signal(signum, cancel)
+        with tempfile.TemporaryFile(mode="w+b") as log:
+            if cancelled is not None:
+                return
             try:
-                returncode = process.wait(timeout=timeout)
-            except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
+                process = subprocess.Popen([str(launcher), "+@ShutdownOnFailedCommand", "1", "+@NoPromptForPassword", "1",
+                    "+login", username, "+workshop_build_item", str(vdf_path.absolute()), "+quit"],
+                    cwd=launcher.parent, env=env, stdin=subprocess.DEVNULL, stdout=log,
+                    stderr=subprocess.STDOUT, start_new_session=True)
+                deadline = time.monotonic() + timeout
+                while cancelled is None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise RuntimeError("SteamCMD timed out; renew the publishing session if Steam authentication expired")
+                    try:
+                        returncode = process.wait(timeout=min(remaining, 0.1))
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+                if cancelled is not None:
+                    return
+            except OSError as error:
+                raise RuntimeError("SteamCMD could not start; check its installed runtime dependencies") from error
+            log.seek(0)
+            output = log.read().decode("utf-8", errors="replace")
+        success = re.search(r"Success\.\s+Published item\s+" + re.escape(item_id) + r"(?:\D|$)", output)
+        failure = re.search(r"ERROR!|Login Failure|Invalid Password|Not logged on|Failed to update workshop item", output, re.IGNORECASE)
+        if returncode != 0 or not success or failure:
+            raise RuntimeError("SteamCMD upload failed; renew the publishing session or check item ownership. Steam output is withheld")
+    finally:
+        try:
+            if process is not None and (cancelled is not None or process.poll() is None):
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
                 process.wait()
-                if isinstance(error, KeyboardInterrupt):
-                    raise
-                raise RuntimeError("SteamCMD timed out; renew the publishing session if Steam authentication expired") from None
-        except OSError as error:
-            raise RuntimeError("SteamCMD could not start; check its installed runtime dependencies") from error
-        log.seek(0)
-        output = log.read().decode("utf-8", errors="replace")
-    success = re.search(r"Success\.\s+Published item\s+" + re.escape(item_id) + r"(?:\D|$)", output)
-    failure = re.search(r"ERROR!|Login Failure|Invalid Password|Not logged on|Failed to update workshop item", output, re.IGNORECASE)
-    if returncode != 0 or not success or failure:
-        raise RuntimeError("SteamCMD upload failed; renew the publishing session or check item ownership. Steam output is withheld")
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+        if cancelled is not None:
+            raise SystemExit(128 + cancelled)
 
 
 def upload(stage: Path, steamcmd_dir: Path, username: str) -> None:

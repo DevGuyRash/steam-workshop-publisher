@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
+from publisher import upload
 from session import LOCAL_ROOT
 
 
@@ -23,8 +24,7 @@ def main() -> None:
             username_file = LOCAL_ROOT / "username"
             if not username_file.is_file():
                 raise SystemExit("Run just login in your own terminal before publishing locally")
-            subprocess.run(["python3", str(root / "publisher.py"), "upload", "--stage", str(stage),
-                            "--steamcmd-dir", str(LOCAL_ROOT), "--username", username_file.read_text().strip()], check=True)
+            upload(stage, LOCAL_ROOT, username_file.read_text().strip())
 
 
 if __name__ == "__main__":
