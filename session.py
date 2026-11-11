@@ -47,15 +47,16 @@ def install(root: Path) -> None:
 
 
 def session_files(root: Path) -> list[Path]:
-    paths = sorted((root / "config").rglob("*")) if (root / "config").exists() else []
-    paths += sorted(root.glob("ssfn*"))
+    home = root / "Steam"
+    paths = sorted((home / "config").rglob("*")) if (home / "config").exists() else []
+    paths += sorted(home.glob("ssfn*"))
     files = []
     for path in paths:
         if path.is_symlink():
             raise ValueError("Steam session contains a symlink")
         if path.is_file():
             files.append(path)
-    if root / "config/config.vdf" not in files:
+    if home / "config/config.vdf" not in files:
         raise ValueError("No SteamCMD session. Run just login --github in your own terminal")
     if sum(path.stat().st_size for path in files) > MAX_STATE_BYTES:
         raise ValueError("Steam session exceeds the size limit")
@@ -65,11 +66,13 @@ def session_files(root: Path) -> list[Path]:
 def pack(root: Path, archive: Path) -> None:
     with tarfile.open(archive, "w") as package:
         for path in session_files(root):
-            package.add(path, arcname=path.relative_to(root).as_posix(), recursive=False)
+            package.add(path, arcname=path.relative_to(root / "Steam").as_posix(), recursive=False)
     archive.chmod(0o600)
 
 
 def unpack(archive: Path, root: Path) -> None:
+    home = root / "Steam"
+    home.mkdir(parents=True, exist_ok=True, mode=0o700)
     with tarfile.open(archive) as package:
         members = package.getmembers()
         names = set()
@@ -82,7 +85,7 @@ def unpack(archive: Path, root: Path) -> None:
             names.add(entry.name)
         if len(members) > 1000 or sum(entry.size for entry in members) > MAX_STATE_BYTES:
             raise ValueError("Steam session exceeds the size limit")
-        package.extractall(root, filter="data")
+        package.extractall(home, filter="data")
     for path in session_files(root):
         path.chmod(0o600)
 
@@ -131,14 +134,22 @@ def restore(root: Path, key_file: Path, repo: str) -> None:
 def login(root: Path, repo: str | None, github: bool) -> None:
     if github:
         repo = publisher_repository(repo)
-    username = input("Steam account name that owns the Workshop items: ").strip()
+    print("Steam Workshop sign-in", flush=True)
+    print("Use the Steam account that owns your Workshop items. GitHub credentials are not used here.", flush=True)
+    username = input("Steam account login username (used to sign in to Steam): ").strip()
     if not re.fullmatch(r"[A-Za-z0-9_@.\-]{1,64}", username):
-        raise ValueError("Invalid Steam account name")
+        raise ValueError("Invalid Steam account login username")
     install(root)
     environment = dict(os.environ, HOME=str(root))
-    print("Enter your password and Steam Guard code directly into SteamCMD. This program does not handle them.")
-    subprocess.run([str(root / "steamcmd.sh"), "+login", username, "+quit"],
-                   cwd=root, env=environment, check=True)
+    print("SteamCMD can reuse its existing Steam sign-in. If it asks for Password, enter your STEAM PASSWORD.", flush=True)
+    print("Then complete STEAM GUARD if requested. Enter both directly into SteamCMD.", flush=True)
+    try:
+        subprocess.run([str(root / "steamcmd.sh"), "+@ShutdownOnFailedCommand", "1", "+login", username, "+quit"],
+                       cwd=root, env=environment, check=True)
+    except subprocess.CalledProcessError:
+        print("Steam sign-in failed. No cloud credentials were changed.", flush=True)
+        print("Retry just login --github with your Steam account login username and Steam password.", flush=True)
+        raise
     session_files(root)
     (root / "username").write_text(username + "\n")
     (root / "username").chmod(0o600)

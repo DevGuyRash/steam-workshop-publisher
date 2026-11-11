@@ -7,10 +7,10 @@ Use this guide for an existing Steam Workshop item. Each mod owns its configurat
 1. Install Python 3.12+, GitHub CLI, `just`, `age`, and the Linux 32-bit runtime required by SteamCMD. Ubuntu uses `lib32gcc-s1`; use the equivalent multilib runtime on other distributions.
 2. Clone the shared publisher and enter its checkout.
 3. Run `just folder /path/to/content --app-id <application-id> --item-id <existing-item-id>` to validate without uploading. For a Zomboid Workshop root containing `Contents` and `workshop.txt`, use `just folder /path/to/Workshop/ExampleMod` without either ID.
-4. Run `just login` in your own terminal. Enter the owning account's password and Steam Guard response directly into SteamCMD.
+4. Run `just login` in your own terminal. Enter your Steam account login username, then your Steam password and Steam Guard response directly into SteamCMD. SteamCMD's `Password` prompt means your Steam password. GitHub credentials are not involved.
 5. Run the same folder command with `publish-folder` instead of `folder`. Check the existing item's update time and change notes.
 
-No GitHub login is needed for folder publishing. Commands run in the foreground and install no service. The dedicated SteamCMD application state lives under `~/.local/share/steam-workshop-publisher/steamcmd`. Keep it private and outside Git.
+No GitHub login is needed for folder publishing. Commands run in the foreground and install no service. The dedicated SteamCMD installation lives under `~/.local/share/steam-workshop-publisher/steamcmd`. Its `HOME` is isolated there, and SteamCMD stores login state below `Steam/config/config.vdf`. Cloud restore uses that same layout. Keep the directory private and outside Git.
 
 Local cancellation by Ctrl+C, SIGTERM, or SIGHUP stops the SteamCMD process group and waits for the direct child before returning. Authentication errors and timeouts fail the command without exposing raw Steam logs.
 
