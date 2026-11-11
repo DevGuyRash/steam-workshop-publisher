@@ -4,15 +4,17 @@ Use this guide for an existing Steam Workshop item. Each mod owns its configurat
 
 ## Publish a local content folder
 
-1. Install Python 3.12+, GitHub CLI, `just`, `age`, and the Linux 32-bit runtime required by SteamCMD. Ubuntu uses `lib32gcc-s1`; use the equivalent multilib runtime on other distributions.
+1. Install Python 3.12+ and sign in through the desktop Steam client. Local folder publishing works on Windows x64, macOS Intel/Apple Silicon, and Linux x64/ARM64 with an accessible compatible Steam client. On Windows, replace `python3` with `python` or `py -3.12` in the commands below. `just` recipes are optional POSIX-shell shortcuts; direct Python commands are the portable interface.
 2. Clone the shared publisher and enter its checkout.
-3. Run `just folder /path/to/content --app-id <application-id> --item-id <existing-item-id>` to validate without uploading. For a Zomboid Workshop root containing `Contents` and `workshop.txt`, use `just folder /path/to/Workshop/ExampleMod` without either ID.
-4. Run `just login` in your own terminal. Enter your Steam account login username, then your Steam password and Steam Guard response directly into SteamCMD. SteamCMD's `Password` prompt means your Steam password. GitHub credentials are not involved.
-5. Run the same folder command with `publish-folder` instead of `folder`. Check the existing item's update time and change notes.
+3. Run `python3 folder.py /path/to/content --app-id <application-id> --item-id <existing-item-id>` to validate without uploading. For a Zomboid Workshop root containing `Contents` and `workshop.txt`, use `python3 folder.py /path/to/Workshop/ExampleMod` without either ID.
+4. Optionally run `python3 desktop.py probe --app-id <application-id>` to detect a usable current login without uploading. First use downloads a hash-pinned Steamworks redistributable into the publisher's `.local/runtime` directory. It does not use a game's libraries or read account credential files.
+5. Add `--publish` to the folder command. The default `auto` backend connects to the current Steam account. If it is unavailable, the command stops and explains what to do. It never starts a second login or silently selects SteamCMD. Check the existing item's update time and change notes after a successful upload.
 
-No GitHub login is needed for folder publishing. Commands run in the foreground and install no service. The dedicated SteamCMD installation lives under `~/.local/share/steam-workshop-publisher/steamcmd`. Its `HOME` is isolated there, and SteamCMD stores login state below `Steam/config/config.vdf`. Cloud restore uses that same layout. Keep the directory private and outside Git.
+No GitHub login is needed for folder publishing. Commands run in the foreground and install no service. `--backend desktop` explicitly selects the current session. `WORKSHOP_BACKEND` can set a default, overridden by the flag. `--runtime-dir` overrides `WORKSHOP_RUNTIME_DIR`; `--offline` prevents runtime downloads while still requiring Steam to be online. See [desktop publishing](desktop.md) for details.
 
-Local cancellation by Ctrl+C, SIGTERM, or SIGHUP stops the SteamCMD process group and waits for the direct child before returning. Authentication errors and timeouts fail the command without exposing raw Steam logs.
+For explicit local SteamCMD publishing on Linux, install its 32-bit runtime (Ubuntu `lib32gcc-s1`) and run `just login` in your own terminal. Enter your Steam account login username, then your Steam password and Steam Guard response directly into SteamCMD. GitHub credentials are not involved. Add `--backend steamcmd --publish` to the folder command. This separate login can replace another Steam session. The dedicated installation lives under `~/.local/share/steam-workshop-publisher/steamcmd`, with its isolated login state below `Steam/config/config.vdf`. Cloud restore uses that same layout. Keep it private and outside Git.
+
+Desktop cancellation and timeouts terminate and reap only the publisher's native helper, leaving the existing Steam client running. The SteamCMD backend stops its owned process group on Ctrl+C, SIGTERM, or SIGHUP. Steam may already have received an upload before cancellation; inspect the existing item before retrying. Authentication errors fail without exposing raw native logs.
 
 ## Configure a mod in its own repository
 
@@ -55,6 +57,8 @@ The ZIP contains `Contents/<relative content path>`. The manifest contains the m
 ```
 
 The packager accepts regular files and rejects symlinks, special files, Git, Mercurial, Subversion metadata, and environment files at every depth. It rejects invalid input before creating release assets. Keep game libraries, credentials, saves, and downloaded dependencies outside the chosen content directory. Drafts, prereleases, older tags, changed staged files, and mismatched hashes cannot upload through the release path.
+
+Content also rejects Windows junctions/reparse points and names that cannot be represented portably, including drive or alternate-stream syntax, reserved Windows names, trailing dots/spaces, and case collisions. The same restrictions apply when extracting release assets on any platform.
 
 ## Enable the cloud publisher
 

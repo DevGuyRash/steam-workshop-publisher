@@ -63,9 +63,9 @@ time.sleep(30)
         content.mkdir()
         (content / 'fixture.txt').write_text('safe fixture')
         commands = [
-            ['publisher.py', 'upload', '--stage', str(self.fixture.stage), '--steamcmd-dir', str(self.steam), '--username', 'test_account'],
-            ['folder.py', str(content), '--app-id', '440', '--item-id', '1234', '--steamcmd-dir', str(self.steam), '--publish'],
-            ['local.py', 'exampleowner/examplemod', 'v0.1.1', '--publish'],
+            ['publisher.py', 'upload', '--stage', str(self.fixture.stage), '--backend', 'steamcmd', '--steamcmd-dir', str(self.steam), '--username', 'test_account'],
+            ['folder.py', str(content), '--app-id', '440', '--item-id', '1234', '--backend', 'steamcmd', '--steamcmd-dir', str(self.steam), '--publish'],
+            ['local.py', 'exampleowner/examplemod', 'v0.1.1', '--backend', 'steamcmd', '--publish'],
         ]
         for command in commands:
             for signum in SIGNALS:
