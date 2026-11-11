@@ -93,7 +93,7 @@ sys.exit({exit_code})
         return steam
 
     def upload(self, steam, success=True):
-        return self.run_cli("upload", "--stage", str(self.stage), "--steamcmd-dir", str(steam),
+        return self.run_cli("upload", "--stage", str(self.stage), "--backend", "steamcmd", "--steamcmd-dir", str(steam),
                             "--username", "test_account", success=success)
 
     def test_prepare_stages_exact_release_content_and_content_only_vdf(self):

@@ -10,9 +10,12 @@ import re
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import zipfile
+
+from content_files import check_names, content_name, content_tree, regular_stat
 
 VERSION = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -112,7 +115,9 @@ def latest_release(mod: Mod, tag: str) -> None:
 
 
 def package_path(name: str, mod: Mod) -> PurePosixPath:
-    path = PurePosixPath(name)
+    if not isinstance(name, str):
+        raise ValueError("Package member names must be strings")
+    path = content_name(name)
     if (not isinstance(name, str) or "\\" in name or any(ord(c) < 32 or ord(c) == 127 for c in name)
             or path.is_absolute() or path.as_posix() != name or ".." in path.parts
             or path.parts[:1] != ("Contents",) or len(path.parts) < 2):
@@ -129,6 +134,7 @@ def manifest_files(manifest: dict, mod: Mod, version: str) -> dict[str, str]:
     for name, expected in files.items():
         package_path(name, mod)
         checked_digest(expected)
+    check_names(files)
     return files
 
 
@@ -213,6 +219,7 @@ def prepare(source: str, tag: str, archive_hash: str | None, notes_hash: str | N
 
 def checked_stage(stage: Path) -> tuple[Mod, str]:
     stage = stage.absolute()
+    regular_stat(stage)
     metadata = json.loads((stage / "stage.json").read_text(encoding="utf-8"))
     mod = configured_mod(metadata["source"])
     if metadata["configuration"] != asdict(mod):
@@ -224,10 +231,8 @@ def checked_stage(stage: Path) -> tuple[Mod, str]:
         raise ValueError("Staging archive identity changed")
     expected = set(files) | {"stage.json", "manifest.json", "release-notes.txt", "upload.vdf"}
     actual = set()
-    for path in stage.rglob("*"):
-        if path.is_symlink():
-            raise ValueError("Staging contains a symlink")
-        if path.is_file():
+    for path, value in content_tree(stage):
+        if stat.S_ISREG(value.st_mode):
             actual.add(path.relative_to(stage).as_posix())
     if actual != expected:
         raise ValueError("Staging file set changed")
@@ -243,6 +248,8 @@ def checked_stage(stage: Path) -> tuple[Mod, str]:
 
 
 def send_to_steam(vdf_path: Path, item_id: str, steamcmd_dir: Path, username: str, timeout: float = 180) -> None:
+    if not sys.platform.startswith("linux"):
+        raise ValueError("The SteamCMD backend is Linux-only. Use desktop Steam on Windows or macOS, or the explicit GitHub workflow")
     if not re.fullmatch(r"[A-Za-z0-9_@.\-]{1,64}", username):
         raise ValueError("Invalid Steam account name")
     launcher = steamcmd_dir.absolute() / "steamcmd.sh"
@@ -308,10 +315,44 @@ def send_to_steam(vdf_path: Path, item_id: str, steamcmd_dir: Path, username: st
             raise SystemExit(128 + cancelled)
 
 
-def upload(stage: Path, steamcmd_dir: Path, username: str) -> None:
+def add_backend_arguments(parser) -> None:
+    parser.add_argument("--backend", choices=("auto", "desktop", "steamcmd"),
+                        help="auto (default) detects desktop Steam; SteamCMD sign-in requires explicit selection. Overrides WORKSHOP_BACKEND")
+    parser.add_argument("--runtime-dir", type=Path, help="Pinned desktop runtime cache; overrides WORKSHOP_RUNTIME_DIR")
+    parser.add_argument("--offline", action="store_true", help="Do not download the desktop runtime; Steam must still be online")
+
+
+def publish_content(content: Path, app_id: str, item_id: str, notes: str, vdf_path: Path, *,
+                    backend: str | None = None, steamcmd_dir: Path | None = None, username: str | None = None,
+                    runtime_dir: Path | None = None, offline: bool = False) -> None:
+    backend = backend if backend is not None else os.environ.get("WORKSHOP_BACKEND", "auto")
+    if backend not in {"auto", "desktop", "steamcmd"}:
+        raise ValueError("WORKSHOP_BACKEND must be auto, desktop, or steamcmd")
+    if backend in {"auto", "desktop"}:
+        from desktop import run
+        print("Using the existing desktop Steam session; no separate login or SteamCMD fallback.", flush=True)
+        run(app_id, content=content, item_id=item_id, notes=notes, runtime=runtime_dir, offline=offline)
+        return
+    if not sys.platform.startswith("linux"):
+        raise ValueError("The SteamCMD backend is Linux-only. Select desktop or use the explicit GitHub workflow")
+    from session import LOCAL_ROOT
+    steamcmd_dir = steamcmd_dir or LOCAL_ROOT
+    if username is None:
+        account_file = steamcmd_dir / "username"
+        if not account_file.is_file():
+            raise ValueError("Run just login in your own terminal before explicit SteamCMD publishing")
+        username = account_file.read_text(encoding="utf-8").strip()
+    print("Using a separate SteamCMD login; this may replace another Steam client or game session.", flush=True)
+    send_to_steam(vdf_path, item_id, steamcmd_dir, username)
+
+
+def upload(stage: Path, steamcmd_dir: Path | None = None, username: str | None = None, *,
+           backend: str | None = None, runtime_dir: Path | None = None, offline: bool = False) -> None:
     mod, tag = checked_stage(stage)
     latest_release(mod, tag)
-    send_to_steam(stage / "upload.vdf", mod.item_id, steamcmd_dir, username)
+    notes = (stage / "release-notes.txt").read_text(encoding="utf-8")
+    publish_content(stage / "Contents", mod.app_id, mod.item_id, notes, stage / "upload.vdf", backend=backend,
+                    steamcmd_dir=steamcmd_dir, username=username, runtime_dir=runtime_dir, offline=offline)
     print(f"Published {tag} to existing Workshop item {mod.item_id}")
 
 
@@ -326,14 +367,15 @@ def main() -> None:
     prepare_parser.add_argument("--out", type=Path, required=True)
     upload_parser = commands.add_parser("upload")
     upload_parser.add_argument("--stage", type=Path, required=True)
-    upload_parser.add_argument("--steamcmd-dir", type=Path, required=True)
-    upload_parser.add_argument("--username", required=True)
+    upload_parser.add_argument("--steamcmd-dir", type=Path)
+    upload_parser.add_argument("--username")
+    add_backend_arguments(upload_parser)
     args = parser.parse_args()
     try:
         if args.command == "prepare":
             prepare(args.source, args.tag, args.archive_sha256, args.notes_sha256, args.out)
         else:
-            upload(args.stage, args.steamcmd_dir, args.username)
+            upload(args.stage, args.steamcmd_dir, args.username, backend=args.backend, runtime_dir=args.runtime_dir, offline=args.offline)
     except (ValueError, KeyError, TypeError, OSError, RuntimeError, zipfile.BadZipFile, subprocess.SubprocessError) as error:
         parser.exit(1, f"Publisher stopped: {error}\n")
 

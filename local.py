@@ -3,9 +3,10 @@
 import argparse
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
-from publisher import upload
+from publisher import add_backend_arguments, upload
 from session import LOCAL_ROOT
 
 
@@ -14,17 +15,21 @@ def main() -> None:
     parser.add_argument("source")
     parser.add_argument("tag")
     parser.add_argument("--publish", action="store_true")
+    parser.add_argument("--steamcmd-dir", type=Path, default=LOCAL_ROOT)
+    parser.add_argument("--username")
+    add_backend_arguments(parser)
     args = parser.parse_args()
     root = Path(__file__).resolve().parent
     with tempfile.TemporaryDirectory(prefix="workshop-release-") as temporary:
         stage = Path(temporary) / "stage"
-        subprocess.run(["python3", str(root / "publisher.py"), "prepare", "--source", args.source,
+        subprocess.run([sys.executable, str(root / "publisher.py"), "prepare", "--source", args.source,
                         "--tag", args.tag, "--out", str(stage)], check=True)
         if args.publish:
-            username_file = LOCAL_ROOT / "username"
-            if not username_file.is_file():
-                raise SystemExit("Run just login in your own terminal before publishing locally")
-            upload(stage, LOCAL_ROOT, username_file.read_text().strip())
+            try:
+                upload(stage, args.steamcmd_dir, args.username, backend=args.backend,
+                       runtime_dir=args.runtime_dir, offline=args.offline)
+            except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
+                parser.exit(1, f"Publisher stopped: {error}\n")
 
 
 if __name__ == "__main__":

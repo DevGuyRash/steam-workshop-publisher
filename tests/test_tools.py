@@ -34,7 +34,7 @@ class SetupTools(unittest.TestCase):
     def test_mod_configuration_is_repeatable_and_does_not_overwrite_another_item(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for name in ("init_config.py", "publisher.py"):
+            for name in ("init_config.py", "publisher.py", "content_files.py"):
                 shutil.copyfile(ROOT / name, root / name)
             arguments = [sys.executable, str(root / "init_config.py"), str(root), "Example", "1234", "440"]
             for _ in range(2):

@@ -1,0 +1,30 @@
+name: Check portable desktop publisher
+on:
+  pull_request:
+    paths: ['*.py', 'tests/test_desktop_portable.py', 'tests/fixtures/**', '.github/workflows/desktop-check.yml']
+  push:
+    branches: [main]
+    paths: ['*.py', 'tests/test_desktop_portable.py', 'tests/fixtures/**', '.github/workflows/desktop-check.yml']
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-26, macos-26-intel, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Exercise portable commands and the compiled native API fixture
+        run: python -m unittest discover -s tests -p test_desktop_portable.py -v
+      - name: Install and verify the pinned native runtime
+        run: python desktop.py install-runtime
+      - name: Load the runtime without signing in or uploading
+        run: python -c "import ctypes; from steam_runtime import install,runtime_root; library=ctypes.CDLL(str(install(runtime_root(),offline=True))); library.SteamAPI_IsSteamRunning.restype=ctypes.c_bool; print('Steam runtime loaded; running client:',library.SteamAPI_IsSteamRunning())"

@@ -4,12 +4,12 @@ default:
     @just --list
 
 # Validate the latest release without signing in to Steam.
-validate source tag:
-    python3 local.py "$1" "$2"
+validate source tag *args:
+    python3 local.py "$@"
 
-# Publish locally through a dedicated SteamCMD login. No service is installed.
-publish source tag:
-    python3 local.py "$1" "$2" --publish
+# Publish using desktop Steam by default. SteamCMD requires --backend steamcmd.
+publish source tag *args:
+    python3 local.py "$@" --publish
 
 # Inspect an existing PZ Workshop folder, or pass --app-id and --item-id for any game.
 folder folder *args:
@@ -41,6 +41,10 @@ login *args:
 # Configure private source access and Steam using your own visible terminal.
 setup-github *args:
     python3 setup_github.py "$@"
+
+# Detect an existing desktop Steam login without uploading.
+probe appid *args:
+    python3 desktop.py probe --app-id "$@"
 
 check:
     python3 -m unittest discover -s tests -v

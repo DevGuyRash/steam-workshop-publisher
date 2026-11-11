@@ -1,21 +1,21 @@
 # Steam Workshop publisher
 
-Publish an existing mod folder or a checked GitHub release to Steam Workshop. Run it locally in the foreground or manually on GitHub. Zomboid Workshop folders supply their own item ID. Other games use explicit Steam application and existing Workshop item IDs. No local service, running game, or desktop Steam session is required by the SteamCMD publisher.
+Publish an existing mod folder or a checked GitHub release to Steam Workshop. Local uploads automatically try the currently signed-in desktop Steam client. No password, Steam Guard prompt, game installation, or background service is needed by this path. Windows x64, macOS Intel/Apple Silicon, and Linux x64/ARM64 have pinned native runtimes; a compatible Steam client must be running under the same OS user. Zomboid Workshop folders supply their own item ID. Other games use explicit application and existing Workshop item IDs.
 
 This repository contains only shared publishing tools. Each mod keeps its settings in its own source repository. The cloud workflow takes a source repository and release tag; it downloads data and never executes that repository's code.
 
-Install Python 3.12+, GitHub CLI, `just`, `age`, and SteamCMD's Linux 32-bit runtime. Follow [the setup guide](docs/setup.md), then sign in once and publish directly from a content folder.
+Install Python 3.12+ and sign in through your desktop Steam client. These commands use the same account. On Windows, use `python` or `py -3.12` in place of `python3`. GitHub CLI is needed for release downloads; folder uploads need only Python and Steam. `just` supplies optional POSIX-shell shortcuts.
 
 ```sh
-just login
-just folder ~/Zomboid/Workshop/ExampleMod
-just publish-folder ~/Zomboid/Workshop/ExampleMod
+python3 desktop.py probe --app-id 108600
+python3 folder.py /path/to/Workshop/ExampleMod
+python3 folder.py /path/to/Workshop/ExampleMod --publish
 ```
 
-`folder` validates and previews the request. `publish-folder` updates the existing item. A Zomboid Workshop root supplies its `Contents` folder and `id=` from `workshop.txt`. For another game's plain content folder, provide both IDs.
+Without `--publish`, `folder.py` validates and previews without connecting to Steam. With `--publish`, it updates the existing item using desktop Steam by default. A Zomboid Workshop root supplies its `Contents` folder and `id=` from `workshop.txt`. For another game's plain content folder, provide both IDs.
 
 ```sh
-just publish-folder /path/to/content --app-id 123456 --item-id 1234567890
+python3 folder.py /path/to/content --app-id 123456 --item-id 1234567890 --publish
 ```
 
 For cloud publishing, initialize settings in the mod's own checkout, package its content, and attach the three generated files to a stable GitHub release.
@@ -36,12 +36,14 @@ just github owner/example-mod v1.2.3
 just github-publish owner/example-mod v1.2.3
 ```
 
-`github` requests cloud validation. `github-publish` requests an upload. Both return after dispatch; follow the run in the publisher's Actions tab. To publish the same source release locally, use `just validate owner/example-mod v1.2.3` or `just publish owner/example-mod v1.2.3`.
+`github` requests cloud validation. `github-publish` requests an upload. Both return after dispatch; follow the run in the publisher's Actions tab. To publish the same source release locally through desktop Steam, use `python3 local.py owner/example-mod v1.2.3 --publish` or `just publish owner/example-mod v1.2.3`.
 
 The cloud worker keeps Steam authentication in Actions secrets and age-encrypted session assets. It saves the refreshed session after each SteamCMD upload attempt. Steam logs and plaintext authentication are never uploaded. If Steam revokes a session or requires Steam Guard again, renew it with `just login --github` in your own terminal.
 
-SteamCMD uses a separate login for the publishing account. It can replace an existing Steam client or game session, including when cached credentials are used. Run these manual uploads when you are prepared for that account's session to change. A game's native Workshop uploader can instead reuse the desktop Steam client.
+`--backend auto` is the local default and detects a usable desktop session through Steam's API. `--backend desktop` selects that path explicitly. Neither falls back to SteamCMD. `WORKSHOP_BACKEND` sets the default; a flag takes precedence. The tool does not read cached account credentials or start Steam. See [desktop publishing](docs/desktop.md) for runtime provenance, offline setup, and platform limits.
 
-The release path checks the source configuration, latest stable version, archive SHA256, and every packaged file before updating an existing positive Workshop item ID. Updates preserve the listing's title, description, tags, visibility, and required items. The game must support SteamCMD Workshop uploads and the signed-in account must have permission to update the item.
+For headless publishing, explicitly select `--backend steamcmd` or use the cloud workflow. This existing backend is Linux-only and needs `age` plus SteamCMD's 32-bit runtime for cloud setup. It signs in separately and can replace another Steam session, including with cached credentials. Local SteamCMD publishing first needs `just login` in your own terminal. The cloud workflow always selects SteamCMD explicitly; it cannot reuse another PC's desktop session.
+
+The release path checks the source configuration, latest stable version, archive SHA256, and every packaged file before updating an existing positive Workshop item ID. Both backends update content and change notes while preserving the listing's title, description, tags, visibility, preview, and required items. The game must support the selected Workshop API and the current account must own the required game license and have permission to update the item.
 
 All cloud uploads share one serialized workflow with room for 100 pending requests. There are no scheduled jobs, Actions artifacts, or Actions caches. Standard GitHub-hosted workers in a public publisher repository do not consume private Actions minutes. See [GitHub billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions), [Valve's Workshop guide](https://partner.steamgames.com/doc/features/workshop/implementation?language=english), and [Valve's SteamCMD authentication guide](https://partner.steamgames.com/doc/sdk/uploading#5).

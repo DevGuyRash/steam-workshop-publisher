@@ -15,7 +15,7 @@ class CloudSetupCLI(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        for name in ("setup_github.py", "session.py", "publisher.py"):
+        for name in ("setup_github.py", "session.py", "publisher.py", "content_files.py"):
             shutil.copyfile(ROOT / name, self.root / name)
         gh = self.root / "gh"
         gh.write_text('''#!/usr/bin/env python3

@@ -60,7 +60,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RELEASES_TOKEN: ${{ secrets.SOURCE_RELEASES_TOKEN }}
           STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
-        run: python3 publisher.py upload --stage "$RUNNER_TEMP/stage" --steamcmd-dir "$RUNNER_TEMP/steamcmd" --username "$STEAM_USERNAME"
+        run: python3 publisher.py upload --stage "$RUNNER_TEMP/stage" --backend steamcmd --steamcmd-dir "$RUNNER_TEMP/steamcmd" --username "$STEAM_USERNAME"
       - name: Preserve the refreshed session after either upload result
         if: always() && inputs.publish && steps.restore.outcome == 'success'
         env:
