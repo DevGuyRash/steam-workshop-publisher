@@ -29,7 +29,7 @@ just package /path/to/Contents ExampleMod 1.2.3
 just add-mod example owner/repository ExampleMod 1234567890
 ```
 
-Attach the three generated files under `.local/packages/ExampleMod-1.2.3` to GitHub release `v1.2.3`. Commit the registry entry. Use an optional final application ID in `add-mod` for another game. Configure cloud access once with `just setup-github` in your own terminal. Then use the same local or GitHub release commands for any registered mod.
+Attach the three generated files under `.local/packages/ExampleMod-1.2.3` to GitHub release `v1.2.3`. Commit the registry entry. Use an optional final application ID in `add-mod` for another game. Local commands reuse your existing `gh` login. Inspect optional cloud requirements with `just setup-github --check`, then configure missing cloud access with `just setup-github` in your own terminal. Public sources need no extra source token. Private sources share one cloud read token; configured credentials are kept. Then use the same local or GitHub release commands for any registered mod.
 
 ```sh
 just validate automindful v0.1.1
