@@ -40,6 +40,8 @@ just github-publish owner/example-mod v1.2.3
 
 The cloud worker keeps Steam authentication in Actions secrets and age-encrypted session assets. It saves the refreshed session after each SteamCMD upload attempt. Steam logs and plaintext authentication are never uploaded. If Steam revokes a session or requires Steam Guard again, renew it with `just login --github` in your own terminal.
 
+SteamCMD uses a separate login for the publishing account. It can replace an existing Steam client or game session, including when cached credentials are used. Run these manual uploads when you are prepared for that account's session to change. A game's native Workshop uploader can instead reuse the desktop Steam client.
+
 The release path checks the source configuration, latest stable version, archive SHA256, and every packaged file before updating an existing positive Workshop item ID. Updates preserve the listing's title, description, tags, visibility, and required items. The game must support SteamCMD Workshop uploads and the signed-in account must have permission to update the item.
 
 All cloud uploads share one serialized workflow with room for 100 pending requests. There are no scheduled jobs, Actions artifacts, or Actions caches. Standard GitHub-hosted workers in a public publisher repository do not consume private Actions minutes. See [GitHub billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions), [Valve's Workshop guide](https://partner.steamgames.com/doc/features/workshop/implementation?language=english), and [Valve's SteamCMD authentication guide](https://partner.steamgames.com/doc/sdk/uploading#5).

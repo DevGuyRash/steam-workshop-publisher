@@ -58,6 +58,8 @@ The packager accepts regular files and rejects symlinks, special files, Git, Mer
 
 ## Enable the cloud publisher
 
+SteamCMD signs in separately as the publishing account and can replace its existing Steam client or game session. Cached credentials remove the password prompt; they do not isolate the account session. Plan manual cloud uploads for times when this is acceptable. [Valve's session-response documentation](https://partner.steamgames.com/doc/api/steam_api#EAuthSessionResponse) describes these disconnections. Use the game's desktop-session uploader instead when you need to keep the current Steam session intact.
+
 1. Keep the shared publisher repository public to use free standard GitHub-hosted workers. Source repositories can be public or private.
 2. Run `just setup-github --check --source owner/example-mod` to inspect missing cloud settings without prompts or changes. Local commands and workflow dispatch reuse your existing `gh` login.
 3. Run `just setup-github --source owner/example-mod` in your own terminal. Public sources need no additional GitHub token. If a selected source is private and cloud source access is missing, the helper requests a fine-grained token with Contents read permission for selected private sources. It stores that token as `SOURCE_RELEASES_TOKEN` in the publisher repository. It does not copy your broad local login. Existing settings are kept.
