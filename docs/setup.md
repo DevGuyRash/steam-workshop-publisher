@@ -47,7 +47,7 @@ Local SteamCMD state lives under `~/.local/share/steam-workshop-publisher/steamc
 
 ## Enable GitHub publishing
 
-Run `just setup-github` in your own terminal to open token setup, store source access through GitHub CLI's hidden prompt, and sign into SteamCMD. The equivalent individual steps follow.
+Local publishing uses your existing `gh` login. It does not require a new GitHub token. Run `just setup-github --check` to inspect what the separate cloud worker still needs without changing settings or opening a prompt. Run `just setup-github` to configure missing cloud access and Steam settings. The helper detects this checkout's GitHub remote and private registered sources, keeps existing settings, and requests a read-only source token only when private sources need one. The equivalent individual steps follow.
 
 1. Keep the shared publisher repository public if you want its standard hosted jobs to avoid private Actions minutes. Keep private source repositories private. Do not put plaintext Steam state or mod archives in the publisher repository.
 2. For private sources, create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) owned by the source account. Select only the approved source repositories. Grant **Contents: Read-only**. Set an expiry you can maintain. Store it as the publisher repository's Actions secret `SOURCE_RELEASES_TOKEN`. Public-only sources do not need that secret. Do not copy your GitHub CLI login token.
@@ -55,9 +55,9 @@ Run `just setup-github` in your own terminal to open token setup, store source a
 4. Open **Actions > Publish Workshop item > Run workflow**. Select the registered mod and latest stable tag. Leave **Upload the checked release to Steam Workshop** unchecked for validation.
 5. After validation passes, run the same workflow with upload enabled. The local machine can be off. GitHub downloads and validates the private release, restores the encrypted SteamCMD state, updates the mapped Workshop item, and encrypts the refreshed session back into the release asset.
 
-You can trigger the same two GitHub modes with `just github <key> <tag>` and `just github-publish <key> <tag>`. These commands dispatch the workflow and return. Use `gh run list --workflow publish.yml --repo DevGuyRash/steam-workshop-publisher` and `gh run watch <run-id> --repo DevGuyRash/steam-workshop-publisher` to follow it. Dispatch needs write access to the publisher, not a new local background process.
+You can trigger the same two GitHub modes with `just github <key> <tag>` and `just github-publish <key> <tag>`. These commands dispatch the workflow and return. From the publisher checkout, use `gh run list --workflow publish.yml` and `gh run watch <run-id>` to follow it. Dispatch needs write access to the publisher, not a new local background process.
 
-For a fork, update `REPOSITORY` in `session.py` and the repository arguments in `justfile`. GitHub runs use their own `GITHUB_REPOSITORY` automatically. The built-in workflow token has Contents write permission only in the publisher so it can save encrypted session state. It has no access to another private repository. `SOURCE_RELEASES_TOKEN` supplies that separate read-only access.
+Forks use their own GitHub remote automatically. No code changes are needed. Use `just setup-github --repo owner/publisher` or `just login --github --repo owner/publisher` to select another destination explicitly. GitHub runs use their own `GITHUB_REPOSITORY` automatically. The built-in workflow token has Contents write permission only in the publisher so it can save encrypted session state. It has no access to another private repository. `SOURCE_RELEASES_TOKEN` supplies that separate read-only access.
 
 ## Renew authentication or retry an upload
 
