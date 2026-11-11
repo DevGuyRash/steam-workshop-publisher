@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class PackageMetadata(unittest.TestCase):
     def run_package(self, content, output):
         return subprocess.run(
-            [sys.executable, str(ROOT / "package.py"), str(content), "AutoMindful", "0.1.1",
+            [sys.executable, str(ROOT / "package.py"), str(content), "ExampleMod", "0.1.1",
              "--out", str(output)], capture_output=True, text=True, timeout=10)
 
     def test_rejects_vcs_metadata_at_every_depth_before_creating_output(self):
@@ -56,7 +56,7 @@ class PackageMetadata(unittest.TestCase):
         self.addCleanup(fixture.doCleanups)
         content = fixture.root / "content"
         payloads = {
-            "mods/AutoMindful/42/mod.info": b"id=AutoMindful\nmodversion=0.1.1\n",
+            "mods/ExampleMod/42/mod.info": b"id=ExampleMod\nmodversion=0.1.1\n",
             ".gitignore": b"temporary files\n",
             ".hgignore": b"syntax: glob\n",
             "nested/.svn-notes.txt": b"ordinary documentation\n",
@@ -68,7 +68,7 @@ class PackageMetadata(unittest.TestCase):
         output = fixture.root / "release"
         result = self.run_package(content, output)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        archive = output / "AutoMindful-0.1.1.zip"
+        archive = output / "ExampleMod-0.1.1.zip"
         manifest = json.loads((output / "manifest.json").read_text())
         expected = {"Contents/" + name: hashlib.sha256(data).hexdigest() for name, data in payloads.items()}
         self.assertEqual(manifest["files"], expected)

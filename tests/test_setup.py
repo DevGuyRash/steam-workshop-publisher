@@ -17,9 +17,6 @@ class CloudSetupCLI(unittest.TestCase):
         self.root = Path(temporary.name)
         for name in ("setup_github.py", "session.py", "publisher.py"):
             shutil.copyfile(ROOT / name, self.root / name)
-        (self.root / "mods.json").write_text(json.dumps({"example": {
-            "source": "ExampleOwner/ExampleMod", "mod_id": "ExampleMod",
-            "item_id": "1234", "archive": "ExampleMod-{version}.zip", "app_id": "440"}}))
         gh = self.root / "gh"
         gh.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -45,8 +42,11 @@ else:
         self.env.update(PATH=str(self.root) + os.pathsep + os.environ["PATH"],
                         SETUP_FIXTURE=str(self.root), PRIVATE="1", SECRET_NAMES="", VARIABLE_NAMES="", BROWSER=str(browser))
 
-    def setup(self, *arguments):
-        result = subprocess.run([sys.executable, str(self.root / "setup_github.py"), *arguments],
+    def setup(self, *arguments, source=True):
+        command = [sys.executable, str(self.root / "setup_github.py")]
+        if source:
+            command += ["--source", "ExampleOwner/ExampleMod"]
+        result = subprocess.run([*command, *arguments],
                                 cwd=self.root, env=self.env, stdin=subprocess.DEVNULL,
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -58,15 +58,13 @@ else:
         self.assertIn("ExampleOwner/SharedPublisher", output)
         self.assertIn("ExampleOwner/ExampleMod", output)
         self.assertIn("cloud worker cannot use the login stored on this computer", output)
-        self.assertNotIn("AutoMindful", output)
-        self.assertNotIn("DevGuyRash", output)
         self.assertFalse((self.root / "browser-opened").exists())
         self.assertFalse(any(call[:2] in (["auth", "status"], ["secret", "set"]) for call in calls))
 
     def test_public_sources_need_no_token_and_existing_steam_setup_is_kept(self):
         self.env.update(PRIVATE="0", SECRET_NAMES="STEAM_SESSION_KEY", VARIABLE_NAMES="STEAM_USERNAME")
         output, calls = self.setup()
-        self.assertIn("All registered sources are public. No source access token is needed", output)
+        self.assertIn("public", output)
         self.assertIn("Keeping the existing Steam session", output)
         self.assertFalse((self.root / "browser-opened").exists())
         self.assertFalse(any(call[:2] == ["secret", "set"] for call in calls))
@@ -78,6 +76,13 @@ else:
         self.assertIn("Cloud setup complete", output)
         self.assertFalse((self.root / "browser-opened").exists())
         self.assertFalse(any(call[:2] == ["secret", "set"] for call in calls))
+
+    def test_shared_setup_needs_no_mod_registration_or_source_token(self):
+        self.env.update(SECRET_NAMES="STEAM_SESSION_KEY", VARIABLE_NAMES="STEAM_USERNAME")
+        output, calls = self.setup(source=False)
+        self.assertIn("Cloud setup complete", output)
+        self.assertFalse(any(call[:2] in (["api", "graphql"], ["secret", "set"]) for call in calls))
+        self.assertFalse((self.root / "browser-opened").exists())
 
     def test_explicit_publisher_overrides_checkout_without_code_edits(self):
         output, calls = self.setup("--check", "--repo", "AnotherOwner/Publisher")

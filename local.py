@@ -11,14 +11,14 @@ from session import LOCAL_ROOT
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mod")
+    parser.add_argument("source")
     parser.add_argument("tag")
     parser.add_argument("--publish", action="store_true")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent
     with tempfile.TemporaryDirectory(prefix="workshop-release-") as temporary:
         stage = Path(temporary) / "stage"
-        subprocess.run(["python3", str(root / "publisher.py"), "prepare", "--mod", args.mod,
+        subprocess.run(["python3", str(root / "publisher.py"), "prepare", "--source", args.source,
                         "--tag", args.tag, "--out", str(stage)], check=True)
         if args.publish:
             username_file = LOCAL_ROOT / "username"

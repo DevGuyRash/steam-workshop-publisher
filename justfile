@@ -4,11 +4,11 @@ default:
     @just --list
 
 # Validate the latest release without signing in to Steam.
-validate mod tag:
+validate source tag:
     python3 local.py "$1" "$2"
 
 # Publish locally through a dedicated SteamCMD login. No service is installed.
-publish mod tag:
+publish source tag:
     python3 local.py "$1" "$2" --publish
 
 # Inspect an existing PZ Workshop folder, or pass --app-id and --item-id for any game.
@@ -23,16 +23,16 @@ publish-folder folder *args:
 package content id version *args:
     python3 package.py "$@"
 
-# Register an existing item for cloud publishing. Application ID defaults to Zomboid.
-add-mod key source id item appid='108600':
-    python3 register.py "$@"
+# Write publishing settings into a mod's own repository. Defaults to Zomboid.
+init directory id item appid='108600':
+    python3 init_config.py "$@"
 
 # Trigger a GitHub validation. Use github-publish to request an upload.
-github mod tag:
-    gh workflow run publish.yml -f mod="$1" -f tag="$2" -F publish=false
+github source tag:
+    gh workflow run publish.yml -f source="$1" -f tag="$2" -F publish=false
 
-github-publish mod tag:
-    gh workflow run publish.yml -f mod="$1" -f tag="$2" -F publish=true
+github-publish source tag:
+    gh workflow run publish.yml -f source="$1" -f tag="$2" -F publish=true
 
 # Sign in locally, or add --github to provision the GitHub publishing session.
 login *args:

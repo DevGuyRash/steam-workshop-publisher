@@ -1,7 +1,7 @@
-"""Validate approved mod releases and update their existing Steam Workshop items."""
+"""Validate source-owned mod releases and update their existing Steam Workshop items."""
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 import os
@@ -14,7 +14,6 @@ import tempfile
 import time
 import zipfile
 
-ROOT = Path(__file__).resolve().parent
 VERSION = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 DIGEST = re.compile(r"[0-9a-f]{64}")
 MAX_BYTES = int(os.environ.get("WORKSHOP_MAX_BYTES", "1073741824"))
@@ -38,27 +37,20 @@ def positive_id(value: str, bits: int, label: str) -> str:
     return value
 
 
-def registry() -> dict[str, Mod]:
-    raw = json.loads((ROOT / "mods.json").read_text(encoding="utf-8"))
-    mods = {}
-    for key, value in raw.items():
-        mod = Mod(**value)
-        if not re.fullmatch(r"[a-z0-9-]+", key):
-            raise ValueError("Invalid registered mod name")
-        validate_mod(mod)
-        mods[key] = mod
-    return mods
+def validate_source(value: str) -> None:
+    if (not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+", value)
+            or value.split("/")[1] in {".", ".."}):
+        raise ValueError("Source repository must use owner/name")
 
 
 def validate_mod(mod: Mod) -> None:
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", mod.source):
-        raise ValueError("Invalid registered source repository")
+    validate_source(mod.source)
     if not re.fullmatch(r"[A-Za-z0-9_-]+", mod.mod_id):
-        raise ValueError("Invalid registered mod ID")
+        raise ValueError("Invalid configured mod ID")
     positive_id(mod.item_id, 64, "Workshop updates")
     positive_id(mod.app_id, 32, "Steam application")
-    if mod.archive.count("{version}") != 1 or not re.fullmatch(r"[A-Za-z0-9_.{}-]+\.zip", mod.archive):
-        raise ValueError("Invalid registered archive name")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]*\{version\}[A-Za-z0-9_.-]*\.zip", mod.archive):
+        raise ValueError("Configured archive must contain one {version} placeholder")
 
 
 def digest(data: bytes) -> str:
@@ -93,6 +85,25 @@ def gh(*args: str) -> bytes:
     return result.stdout
 
 
+def configured_mod(source: str) -> Mod:
+    validate_source(source)
+    try:
+        raw = gh("api", f"repos/{source}/contents/workshop-publisher.json",
+                 "--header", "Accept: application/vnd.github.raw+json")
+    except RuntimeError:
+        raise RuntimeError("Cannot read workshop-publisher.json from the source default branch; initialize and commit its publishing settings, and check source access") from None
+    if len(raw) > 65536:
+        raise ValueError("Source Workshop configuration exceeds the size limit")
+    settings = json.loads(raw)
+    required = {"mod_id", "item_id", "archive"}
+    if (not isinstance(settings, dict) or not required <= settings.keys() <= required | {"app_id"}
+            or not all(isinstance(value, str) for value in settings.values())):
+        raise ValueError("workshop-publisher.json needs string mod_id, item_id, archive, and optional app_id fields")
+    mod = Mod(source=source, **settings)
+    validate_mod(mod)
+    return mod
+
+
 def latest_release(mod: Mod, tag: str) -> None:
     release = json.loads(gh("api", f"repos/{mod.source}/releases/latest"))
     if (release.get("tag_name") != tag or release.get("draft") is not False
@@ -111,7 +122,7 @@ def package_path(name: str, mod: Mod) -> PurePosixPath:
 
 def manifest_files(manifest: dict, mod: Mod, version: str) -> dict[str, str]:
     if manifest.get("id") != mod.mod_id or manifest.get("version") != version:
-        raise ValueError("Manifest identity does not match the registered mod and release tag")
+        raise ValueError("Manifest identity does not match the source mod and release tag")
     files = manifest.get("files")
     if not isinstance(files, dict) or not files or len(files) > MAX_FILES:
         raise ValueError("Manifest must contain a bounded, nonempty file map")
@@ -137,9 +148,9 @@ def vdf(mod: Mod, stage: Path, notes: str) -> str:
     return workshop_vdf(mod.app_id, mod.item_id, stage / "Contents", notes)
 
 
-def prepare(mod_key: str, tag: str, archive_hash: str | None, notes_hash: str | None, out: Path) -> None:
-    mod = registry()[mod_key]
+def prepare(source: str, tag: str, archive_hash: str | None, notes_hash: str | None, out: Path) -> None:
     version = release_version(tag)
+    mod = configured_mod(source)
     if archive_hash is not None:
         checked_digest(archive_hash)
     if notes_hash is not None:
@@ -192,17 +203,20 @@ def prepare(mod_key: str, tag: str, archive_hash: str | None, notes_hash: str | 
         notes = notes_path.read_text(encoding="utf-8")
         (stage / "release-notes.txt").write_bytes(notes_path.read_bytes())
         (stage / "manifest.json").write_bytes(manifest_path.read_bytes())
-        (stage / "stage.json").write_text(json.dumps({"mod": mod_key, "tag": tag,
+        (stage / "stage.json").write_text(json.dumps({"source": mod.source, "tag": tag,
+            "configuration": asdict(mod),
             "archive_sha256": archive_hash, "notes_sha256": notes_hash}) + "\n", encoding="utf-8")
         (stage / "upload.vdf").write_text(vdf(mod, out, notes), encoding="utf-8")
         stage.rename(out)
-    print(f"Prepared {mod_key} {tag} for existing Workshop item {mod.item_id}")
+    print(f"Prepared {mod.source} {tag} for existing Workshop item {mod.item_id}")
 
 
 def checked_stage(stage: Path) -> tuple[Mod, str]:
     stage = stage.absolute()
     metadata = json.loads((stage / "stage.json").read_text(encoding="utf-8"))
-    mod = registry()[metadata["mod"]]
+    mod = configured_mod(metadata["source"])
+    if metadata["configuration"] != asdict(mod):
+        raise ValueError("Source Workshop configuration changed after staging")
     version = release_version(metadata["tag"])
     manifest = json.loads((stage / "manifest.json").read_text(encoding="utf-8"))
     files = manifest_files(manifest, mod, version)
@@ -305,7 +319,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     prepare_parser = commands.add_parser("prepare")
-    prepare_parser.add_argument("--mod", required=True, choices=registry())
+    prepare_parser.add_argument("--source", required=True, help="Source repository owner/name")
     prepare_parser.add_argument("--tag", required=True)
     prepare_parser.add_argument("--archive-sha256")
     prepare_parser.add_argument("--notes-sha256")
@@ -317,7 +331,7 @@ def main() -> None:
     args = parser.parse_args()
     try:
         if args.command == "prepare":
-            prepare(args.mod, args.tag, args.archive_sha256, args.notes_sha256, args.out)
+            prepare(args.source, args.tag, args.archive_sha256, args.notes_sha256, args.out)
         else:
             upload(args.stage, args.steamcmd_dir, args.username)
     except (ValueError, KeyError, TypeError, OSError, RuntimeError, zipfile.BadZipFile, subprocess.SubprocessError) as error:

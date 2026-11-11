@@ -2,7 +2,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import stat
 import subprocess
 import sys
@@ -11,7 +10,7 @@ import unittest
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-MEMBER = "Contents/mods/AutoMindful/42/mod.info"
+MEMBER = "Contents/mods/ExampleMod/42/mod.info"
 
 
 class PublisherCLI(unittest.TestCase):
@@ -27,7 +26,9 @@ class PublisherCLI(unittest.TestCase):
         gh.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, shutil, sys
 root = pathlib.Path(os.environ["FIXTURES"])
-if sys.argv[1] == "api":
+if sys.argv[1] == "api" and '/contents/workshop-publisher.json' in sys.argv[2]:
+    print((root / "configuration.json").read_text())
+elif sys.argv[1] == "api":
     print((root / "latest.json").read_text())
 else:
     out = pathlib.Path(sys.argv[sys.argv.index("--dir")+1])
@@ -37,24 +38,31 @@ else:
         gh.chmod(0o700)
         self.env = {**os.environ, "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
                     "FIXTURES": str(self.root)}
+        self.configuration()
         self.latest()
         self.package()
         self.stage = self.root / "stage"
+
+    def configuration(self, **overrides):
+        values = {"mod_id": "ExampleMod", "item_id": "1234567890",
+                  "archive": "ExampleMod-{version}.zip", "app_id": "108600"}
+        values.update(overrides)
+        (self.root / "configuration.json").write_text(json.dumps(values))
 
     def latest(self, tag="v0.1.1", prerelease=False):
         (self.root / "latest.json").write_text(json.dumps({"tag_name": tag, "draft": False,
             "prerelease": prerelease, "published_at": "2026-11-10T12:00:00Z"}))
 
     def package(self, entries=None, files=None):
-        entries = entries or [(MEMBER, b"id=AutoMindful\nmodversion=0.1.1\n", stat.S_IFREG | 0o644)]
-        archive = self.assets / "AutoMindful-0.1.1.zip"
+        entries = entries or [(MEMBER, b"id=ExampleMod\nmodversion=0.1.1\n", stat.S_IFREG | 0o644)]
+        archive = self.assets / "ExampleMod-0.1.1.zip"
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
             for name, data, mode in entries:
                 entry = zipfile.ZipInfo(name)
                 entry.external_attr = mode << 16
                 output.writestr(entry, data)
         files = files if files is not None else {name: hashlib.sha256(data).hexdigest() for name, data, _ in entries}
-        (self.assets / "manifest.json").write_text(json.dumps({"id": "AutoMindful", "version": "0.1.1",
+        (self.assets / "manifest.json").write_text(json.dumps({"id": "ExampleMod", "version": "0.1.1",
             "archiveSha256": hashlib.sha256(archive.read_bytes()).hexdigest(), "files": files}))
         (self.assets / "release-notes.txt").write_text('Read "books".\nPath C:\\books\n')
 
@@ -65,10 +73,10 @@ else:
         return result.stdout + result.stderr
 
     def prepare(self, *extra, success=True):
-        return self.run_cli("prepare", "--mod", "automindful", "--tag", "v0.1.1", "--out", str(self.stage),
+        return self.run_cli("prepare", "--source", "exampleowner/examplemod", "--tag", "v0.1.1", "--out", str(self.stage),
                             *extra, success=success)
 
-    def steam(self, message="Success. Published item 3837554362.", exit_code=0):
+    def steam(self, message="Success. Published item 1234567890.", exit_code=0):
         steam = self.root / "steamcmd"
         steam.mkdir(exist_ok=True)
         launcher = steam / "steamcmd.sh"
@@ -90,10 +98,10 @@ sys.exit({exit_code})
 
     def test_prepare_stages_exact_release_content_and_content_only_vdf(self):
         self.prepare()
-        self.assertEqual((self.stage / MEMBER).read_bytes(), b"id=AutoMindful\nmodversion=0.1.1\n")
+        self.assertEqual((self.stage / MEMBER).read_bytes(), b"id=ExampleMod\nmodversion=0.1.1\n")
         vdf = (self.stage / "upload.vdf").read_text()
         self.assertIn('"appid" "108600"', vdf)
-        self.assertIn('"publishedfileid" "3837554362"', vdf)
+        self.assertIn('"publishedfileid" "1234567890"', vdf)
         self.assertIn('"changenote" "Read \\"books\\".\\nPath C:\\\\books\\n"', vdf)
         for field in ["visibility", "title", "description", "tags", "previewfile"]:
             self.assertNotIn('"' + field + '"', vdf)
@@ -115,10 +123,10 @@ sys.exit({exit_code})
 
     def test_package_rejects_traversal_symlinks_duplicates_and_unlisted_members(self):
         cases = [
-            [("Contents/mods/AutoMindful/../../outside", b"x", stat.S_IFREG | 0o644)],
+            [("Contents/mods/ExampleMod/../../outside", b"x", stat.S_IFREG | 0o644)],
             [(MEMBER, b"target", stat.S_IFLNK | 0o777)],
             [(MEMBER, b"one", stat.S_IFREG | 0o644), (MEMBER, b"two", stat.S_IFREG | 0o644)],
-            [(MEMBER, b"id=AutoMindful\n", stat.S_IFREG | 0o644), ("outside", b"x", stat.S_IFREG | 0o644)],
+            [(MEMBER, b"id=ExampleMod\n", stat.S_IFREG | 0o644), ("outside", b"x", stat.S_IFREG | 0o644)],
         ]
         for entries in cases:
             with self.subTest(entries=entries):
@@ -150,8 +158,8 @@ sys.exit({exit_code})
     def test_failed_or_wrong_item_upload_never_prints_steam_output(self):
         self.prepare()
         for message, code in [("ERROR! password-canary", 0), ("Success. Published item 999. password-canary", 0),
-                              ("Success. Published item 3837554362. password-canary", 1),
-                              ("Success. Published item 3837554362. ERROR! password-canary", 0)]:
+                              ("Success. Published item 1234567890. password-canary", 1),
+                              ("Success. Published item 1234567890. ERROR! password-canary", 0)]:
             with self.subTest(message=message, code=code):
                 output = self.upload(self.steam(message, code), success=False)
                 self.assertNotIn("password-canary", output)
@@ -164,12 +172,8 @@ sys.exit({exit_code})
         self.upload(steam, success=False)
         self.assertFalse((self.root / "steam-call.json").exists())
 
-    def test_other_games_allow_their_own_content_and_registered_application_id(self):
-        tool = self.root / "tool"
-        tool.mkdir()
-        shutil.copyfile(ROOT / "publisher.py", tool / "publisher.py")
-        (tool / "mods.json").write_text(json.dumps({"texture": {"source": "example/texture", "mod_id": "Texture",
-            "item_id": "1234", "archive": "Texture-{version}.zip", "app_id": "440"}}))
+    def test_other_games_allow_their_own_content_and_configured_application_id(self):
+        self.configuration(mod_id="Texture", item_id="1234", archive="Texture-{version}.zip", app_id="440")
         archive = self.assets / "Texture-0.1.1.zip"
         data = b"texture fixture"
         name = "Contents/materials/custom.vmt"
@@ -178,12 +182,28 @@ sys.exit({exit_code})
         (self.assets / "manifest.json").write_text(json.dumps({"id": "Texture", "version": "0.1.1",
             "archiveSha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
             "files": {name: hashlib.sha256(data).hexdigest()}}))
-        result = subprocess.run([sys.executable, str(tool / "publisher.py"), "prepare", "--mod", "texture",
+        result = subprocess.run([sys.executable, str(ROOT / "publisher.py"), "prepare", "--source", "exampleowner/texture",
             "--tag", "v0.1.1", "--out", str(self.stage)], env=self.env, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((self.stage / name).read_bytes(), data)
         self.assertIn('"appid" "440"', (self.stage / "upload.vdf").read_text())
         self.assertIn('"publishedfileid" "1234"', (self.stage / "upload.vdf").read_text())
+
+    def test_source_configuration_changes_stop_a_staged_upload(self):
+        self.prepare()
+        steam = self.steam()
+        self.configuration(item_id="9999")
+        self.upload(steam, success=False)
+        self.assertFalse((self.root / "steam-call.json").exists())
+
+    def test_source_and_configuration_are_validated_before_release_download(self):
+        for source in ("../outside", "owner/../outside", "owner/repo?query", "owner/repo;command"):
+            with self.subTest(source=source):
+                self.run_cli("prepare", "--source", source, "--tag", "v0.1.1", "--out", str(self.stage), success=False)
+                self.assertFalse(self.stage.exists())
+        self.configuration(source="another-owner/another-repository")
+        self.prepare(success=False)
+        self.assertFalse(self.stage.exists())
 
 
 if __name__ == "__main__":
