@@ -5,7 +5,7 @@ import json
 import subprocess
 import webbrowser
 
-from publisher import registry
+from publisher import validate_source
 from session import LOCAL_ROOT, login, publisher_repository
 
 
@@ -14,10 +14,11 @@ def gh(*arguments: str) -> str:
     return result.stdout.strip()
 
 
-def inspect_setup(repository: str) -> tuple[list[str], set[str], set[str]]:
-    sources = sorted({mod.source for mod in registry().values()})
+def inspect_setup(repository: str, sources: list[str]) -> tuple[list[str], set[str], set[str]]:
+    sources = sorted(set(sources))
     fields = []
     for index, source in enumerate(sources):
+        validate_source(source)
         owner, name = source.split("/")
         fields.append(f"r{index}:repository(owner:{json.dumps(owner)},name:{json.dumps(name)}){{isPrivate}}")
     response = json.loads(gh("api", "graphql", "-f", "query=query{" + " ".join(fields) + "}")) if sources else {"data": {}}
@@ -33,14 +34,14 @@ def inspect_setup(repository: str) -> tuple[list[str], set[str], set[str]]:
     return private, secrets, variables
 
 
-def setup(repository: str, check: bool) -> None:
-    private, secrets, variables = inspect_setup(repository)
+def setup(repository: str, sources: list[str], check: bool) -> None:
+    private, secrets, variables = inspect_setup(repository, sources)
     source_missing = bool(private) and "SOURCE_RELEASES_TOKEN" not in secrets
     steam_ready = "STEAM_SESSION_KEY" in secrets and "STEAM_USERNAME" in variables
     print("Your existing local gh login is working. Local publishing reuses it; no extra GitHub token is needed locally.")
     print(f"This command configures publishing on GitHub's separate cloud worker in {repository}.")
     if private:
-        print("Registered private source repositories:")
+        print("Selected private source repositories:")
         for source in private:
             print(f"  {source}")
         if source_missing:
@@ -49,7 +50,7 @@ def setup(repository: str, check: bool) -> None:
         else:
             print("Cloud source access is already configured; keeping the existing SOURCE_RELEASES_TOKEN.")
     else:
-        print("All registered sources are public. No source access token is needed.")
+        print("Selected sources are public or none were requested. No extra source access token is needed.")
     print("Cloud Steam authentication is already configured." if steam_ready else "Cloud Steam authentication needs a one-time SteamCMD sign-in.")
     if check:
         print("Status only. No browser opened, credentials requested, or settings changed.")
@@ -64,18 +65,19 @@ def setup(repository: str, check: bool) -> None:
         login(LOCAL_ROOT, repository, github=True)
     else:
         print("Keeping the existing Steam session. To renew it, run just login --github.")
-    print("Cloud setup complete. Validate a registered release with just github <mod> <tag>.")
+    print("Cloud setup complete. Validate a source release with just github <owner/repository> <tag>.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", help="Publisher repository owner/name; default is this checkout's GitHub remote")
+    parser.add_argument("--source", action="append", default=[], help="Optional source owner/repository to inspect for private-release access")
     parser.add_argument("--check", action="store_true", help="Show required cloud setup without prompting or changing anything")
     args = parser.parse_args()
     try:
-        setup(publisher_repository(args.repo), args.check)
+        setup(publisher_repository(args.repo), args.source, args.check)
     except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
-        parser.exit(1, f"Could not inspect or configure the cloud publisher ({type(error).__name__}). Check gh access to the publisher and registered sources.\n")
+        parser.exit(1, f"Could not inspect or configure the cloud publisher ({type(error).__name__}). Check gh access to the publisher and selected sources.\n")
 
 
 if __name__ == "__main__":

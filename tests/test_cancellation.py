@@ -65,7 +65,7 @@ time.sleep(30)
         commands = [
             ['publisher.py', 'upload', '--stage', str(self.fixture.stage), '--steamcmd-dir', str(self.steam), '--username', 'test_account'],
             ['folder.py', str(content), '--app-id', '440', '--item-id', '1234', '--steamcmd-dir', str(self.steam), '--publish'],
-            ['local.py', 'automindful', 'v0.1.1', '--publish'],
+            ['local.py', 'exampleowner/examplemod', 'v0.1.1', '--publish'],
         ]
         for command in commands:
             for signum in SIGNALS:

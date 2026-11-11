@@ -1,13 +1,12 @@
 name: Publish Workshop item
-run-name: ${{ inputs.publish && 'Publish' || 'Validate' }} ${{ inputs.mod }} ${{ inputs.tag }}
+run-name: ${{ inputs.publish && 'Publish' || 'Validate' }} ${{ inputs.source }} ${{ inputs.tag }}
 
 on:
   workflow_dispatch:
     inputs:
-      mod:
-        description: Approved key from mods.json
+      source:
+        description: Source GitHub repository, such as owner/example-mod
         required: true
-        default: automindful
         type: string
       tag:
         description: Latest stable GitHub release tag, such as v0.1.1
@@ -38,13 +37,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Check and stage the approved release
+      - name: Check source configuration and stage the release
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RELEASES_TOKEN: ${{ secrets.SOURCE_RELEASES_TOKEN }}
-          MOD: ${{ inputs.mod }}
+          SOURCE: ${{ inputs.source }}
           TAG: ${{ inputs.tag }}
-        run: python3 publisher.py prepare --mod "$MOD" --tag "$TAG" --out "$RUNNER_TEMP/stage"
+        run: python3 publisher.py prepare --source "$SOURCE" --tag "$TAG" --out "$RUNNER_TEMP/stage"
       - name: Install publishing dependencies
         if: inputs.publish
         run: sudo apt-get update -qq && sudo apt-get install -y age lib32gcc-s1
