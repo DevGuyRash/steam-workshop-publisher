@@ -9,34 +9,38 @@ import stat
 import zipfile
 
 from publisher import MAX_BYTES, MAX_FILES, release_version
+from content_files import check_names, content_name, content_tree, read_regular, regular_stat
 
 
 def build(content: Path, mod_id: str, version: str, output: Path, notes: str) -> None:
     release_version("v" + version)
     if not re.fullmatch(r"[A-Za-z0-9_-]+", mod_id):
         raise ValueError("Use a mod ID containing letters, digits, underscores, or hyphens")
-    if not content.is_dir() or content.is_symlink():
+    if not content.is_dir():
         raise ValueError("Content must be an existing regular directory")
+    regular_stat(content)
     files = {}
-    for path in sorted(content.rglob("*")):
+    for path, value in content_tree(content):
         relative = path.relative_to(content)
         if any(part in {".git", ".hg", ".svn"} or part == ".env" or part.startswith(".env.") for part in relative.parts):
             raise ValueError("Select the content folder, excluding version-control metadata and environment files")
-        if path.is_symlink() or not (path.is_dir() or stat.S_ISREG(path.stat().st_mode)):
-            raise ValueError("Content must contain only regular files and directories")
-        if path.is_file():
+        if stat.S_ISREG(value.st_mode):
             name = "Contents/" + relative.as_posix()
-            if "\\" in name or any(ord(char) < 32 or ord(char) == 127 for char in name):
-                raise ValueError("Content contains an unsupported filename")
+            content_name(name)
             files[name] = path
     if not files or len(files) > MAX_FILES or sum(path.stat().st_size for path in files.values()) > MAX_BYTES:
         raise ValueError("Content is empty or exceeds the package size limit")
+    check_names(files)
     output.mkdir(parents=True, exist_ok=False)
     archive = output / f"{mod_id}-{version}.zip"
     manifest = {}
+    total = 0
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as package:
         for name, path in files.items():
-            data = path.read_bytes()
+            data = read_regular(path, MAX_BYTES - total)
+            total += len(data)
+            if total > MAX_BYTES:
+                raise ValueError("Content grew beyond the package size limit")
             member = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
             member.compress_type = zipfile.ZIP_DEFLATED
             member.external_attr = 0o100644 << 16

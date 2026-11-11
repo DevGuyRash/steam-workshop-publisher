@@ -6,6 +6,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import urllib.request
@@ -51,6 +52,8 @@ def publisher_repository(explicit: str | None = None) -> str:
 
 
 def install(root: Path) -> None:
+    if not sys.platform.startswith("linux"):
+        raise ValueError("SteamCMD setup is Linux-only. Use desktop Steam for local publishing on Windows/macOS, or provision cloud authentication on Linux")
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     root.chmod(0o700)
     if (root / "steamcmd.sh").is_file():

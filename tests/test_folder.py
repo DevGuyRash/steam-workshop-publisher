@@ -73,7 +73,7 @@ pathlib.Path({str(observed)!r}).write_text(json.dumps({{"vdf": vdf, "content": (
 print('Success. Published item 1234.')
 ''')
         launcher.chmod(0o700)
-        output = self.run_cli(self.workshop, "--publish", "--steamcmd-dir", steam)
+        output = self.run_cli(self.workshop, "--publish", "--backend", "steamcmd", "--steamcmd-dir", steam)
         self.assertIn("Published content to existing Workshop item 1234", output)
         result = json.loads(observed.read_text())
         self.assertEqual(result["content"], "return 42\n")

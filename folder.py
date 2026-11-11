@@ -2,13 +2,13 @@
 
 import argparse
 import hashlib
-import os
 from pathlib import Path
 import stat
 import subprocess
 import tempfile
 
-from publisher import MAX_BYTES, MAX_FILES, positive_id, send_to_steam, workshop_vdf
+from content_files import check_names, content_name, content_tree, read_regular, regular_stat
+from publisher import MAX_BYTES, MAX_FILES, add_backend_arguments, positive_id, publish_content, workshop_vdf
 from session import LOCAL_ROOT
 
 
@@ -16,11 +16,13 @@ def content_source(path: Path, app_id: str | None, item_id: str | None) -> tuple
     path = path.expanduser()
     if path.is_symlink() or not path.is_dir():
         raise ValueError("Choose a regular content folder or a Project Zomboid Workshop folder")
+    regular_stat(path)
     path = path.resolve()
     metadata = path / "workshop.txt"
     if (path / "Contents").is_dir() and metadata.is_file():
         if metadata.is_symlink() or metadata.stat().st_size > 65536:
             raise ValueError("Invalid Workshop metadata file")
+        regular_stat(metadata)
         ids = [line.partition("=")[2].strip() for line in metadata.read_text(encoding="utf-8").splitlines()
                if line.startswith("id=")]
         if item_id is None:
@@ -35,31 +37,26 @@ def content_source(path: Path, app_id: str | None, item_id: str | None) -> tuple
 
 
 def snapshot(source: Path, destination: Path) -> tuple[int, str]:
-    if source.is_symlink():
-        raise ValueError("Content folder cannot be a symlink")
+    regular_stat(source)
     destination.mkdir(mode=0o700)
     total = 0
     count = 0
     fingerprint = hashlib.sha256()
-    for path in sorted(source.rglob("*")):
+    names = []
+    for path, value in content_tree(source):
         relative = path.relative_to(source)
         name = relative.as_posix()
-        if "\\" in name or any(ord(char) < 32 or ord(char) == 127 for char in name):
-            raise ValueError("Content contains an unsupported filename")
+        content_name(name)
         if any(part in {".git", ".hg", ".svn"} or part == ".env" or part.startswith(".env.") for part in relative.parts):
             raise ValueError("Choose the packaged content folder; Git metadata and environment files cannot be uploaded")
-        mode = path.lstat().st_mode
-        if stat.S_ISLNK(mode) or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
-            raise ValueError("Content must contain only regular files and directories")
+        mode = value.st_mode
         if stat.S_ISDIR(mode):
             continue
         count += 1
         if count > MAX_FILES:
             raise ValueError("Content exceeds the supported file count")
-        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb") as stream:
-            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                raise ValueError("Content changed into a non-regular file")
-            data = stream.read(MAX_BYTES - total + 1)
+        names.append(name)
+        data = read_regular(path, MAX_BYTES - total)
         total += len(data)
         if total > MAX_BYTES:
             raise ValueError("Content exceeds WORKSHOP_MAX_BYTES")
@@ -69,11 +66,13 @@ def snapshot(source: Path, destination: Path) -> tuple[int, str]:
         fingerprint.update(name.encode("utf-8") + b"\0" + hashlib.sha256(data).digest())
     if not count:
         raise ValueError("Content folder is empty")
+    check_names(names)
     return count, fingerprint.hexdigest()
 
 
 def publish_folder(path: Path, app_id: str | None, item_id: str | None, steamcmd_dir: Path,
-                   username: str | None, notes: str, publish: bool) -> None:
+                   username: str | None, notes: str, publish: bool, *, backend: str | None = None,
+                   runtime_dir: Path | None = None, offline: bool = False) -> None:
     source, app_id, item_id = content_source(path, app_id, item_id)
     with tempfile.TemporaryDirectory(prefix="workshop-folder-") as temporary:
         stage = Path(temporary)
@@ -84,12 +83,8 @@ def publish_folder(path: Path, app_id: str | None, item_id: str | None, steamcmd
         print(f"Validated {count} files for Steam app {app_id}, existing Workshop item {item_id}")
         print(f"Content SHA256: {fingerprint}")
         if publish:
-            if username is None:
-                account_file = steamcmd_dir / "username"
-                if not account_file.is_file():
-                    raise ValueError("Run just login in your own terminal before publishing locally")
-                username = account_file.read_text(encoding="utf-8").strip()
-            send_to_steam(upload, item_id, steamcmd_dir, username)
+            publish_content(content, app_id, item_id, notes, upload, backend=backend,
+                            steamcmd_dir=steamcmd_dir, username=username, runtime_dir=runtime_dir, offline=offline)
             print(f"Published content to existing Workshop item {item_id}")
 
 
@@ -101,6 +96,7 @@ def main() -> None:
     parser.add_argument("--steamcmd-dir", type=Path, default=LOCAL_ROOT)
     parser.add_argument("--username")
     parser.add_argument("--notes-file", type=Path)
+    add_backend_arguments(parser)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--publish", action="store_true")
     mode.add_argument("--dry-run", action="store_true")
@@ -108,7 +104,7 @@ def main() -> None:
     try:
         notes = args.notes_file.read_text(encoding="utf-8") if args.notes_file else ""
         publish_folder(args.folder, args.app_id or None, args.item_id or None, args.steamcmd_dir.expanduser(),
-                       args.username, notes, args.publish)
+                       args.username, notes, args.publish, backend=args.backend, runtime_dir=args.runtime_dir, offline=args.offline)
     except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
         parser.exit(1, f"Publisher stopped: {error}\n")
 
