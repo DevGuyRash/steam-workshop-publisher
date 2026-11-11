@@ -38,7 +38,7 @@ just github-publish owner/example-mod v1.2.3
 
 `github` requests cloud validation. `github-publish` requests an upload. Both return after dispatch; follow the run in the publisher's Actions tab. To publish the same source release locally, use `just validate owner/example-mod v1.2.3` or `just publish owner/example-mod v1.2.3`.
 
-The cloud worker keeps Steam authentication in one Actions secret and age-encrypted session assets. It saves the refreshed session after each SteamCMD upload attempt. Steam logs and plaintext authentication are never uploaded. If Steam revokes a session or requires Steam Guard again, renew it with `just login --github` in your own terminal.
+The cloud worker keeps Steam authentication in Actions secrets and age-encrypted session assets. It saves the refreshed session after each SteamCMD upload attempt. Steam logs and plaintext authentication are never uploaded. If Steam revokes a session or requires Steam Guard again, renew it with `just login --github` in your own terminal.
 
 The release path checks the source configuration, latest stable version, archive SHA256, and every packaged file before updating an existing positive Workshop item ID. Updates preserve the listing's title, description, tags, visibility, and required items. The game must support SteamCMD Workshop uploads and the signed-in account must have permission to update the item.
 

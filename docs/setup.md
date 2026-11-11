@@ -61,13 +61,15 @@ The packager accepts regular files and rejects symlinks, special files, Git, Mer
 1. Keep the shared publisher repository public to use free standard GitHub-hosted workers. Source repositories can be public or private.
 2. Run `just setup-github --check --source owner/example-mod` to inspect missing cloud settings without prompts or changes. Local commands and workflow dispatch reuse your existing `gh` login.
 3. Run `just setup-github --source owner/example-mod` in your own terminal. Public sources need no additional GitHub token. If a selected source is private and cloud source access is missing, the helper requests a fine-grained token with Contents read permission for selected private sources. It stores that token as `SOURCE_RELEASES_TOKEN` in the publisher repository. It does not copy your broad local login. Existing settings are kept.
-4. Enter Steam authentication directly into SteamCMD when requested. Setup stores an age decryption key as Actions secret `STEAM_SESSION_KEY`, sets variable `STEAM_USERNAME`, and uploads only encrypted session state to a `steam-session` prerelease in the publisher repository.
+4. Enter Steam authentication directly into SteamCMD when requested. Setup stores the age decryption key and Steam account name as masked Actions secrets `STEAM_SESSION_KEY` and `STEAM_USERNAME`. It uploads only encrypted session state to a `steam-session` prerelease in the publisher repository.
 5. Request cloud validation with `just github owner/example-mod v1.2.3`. Wait for its successful result.
 6. Request an upload with `just github-publish owner/example-mod v1.2.3`. Follow that run to completion and check the same Workshop item. The local machine can be off during the cloud run.
 
 You can make the same requests under **Actions > Publish Workshop item > Run workflow**, using the source repository and stable tag. Upload defaults to false. From the publisher checkout, follow runs with `gh run list --workflow publish.yml` and `gh run watch <run-id>`.
 
 The built-in cloud token belongs to the publisher repository and can save encrypted session assets there. Public source releases need no separate credential. Private source access uses the optional read-only token. All items must be updateable by the Steam account used for the shared session. Use a separate publisher instance for another owner.
+
+If an older setup stored `STEAM_USERNAME` as a repository variable, run `just setup-github` to move it into a masked secret and remove the variable. The helper keeps the existing Steam session and does not request another Steam Guard approval for this migration. `just setup-github --check` reports the needed migration without changing settings.
 
 Forks detect their own GitHub remote without code changes. Select another destination explicitly with `just setup-github --repo owner/publisher --source owner/example-mod` or `just login --github --repo owner/publisher`. Cloud jobs use `GITHUB_REPOSITORY` automatically.
 

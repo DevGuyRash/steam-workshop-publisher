@@ -6,7 +6,7 @@ import subprocess
 import webbrowser
 
 from publisher import validate_source
-from session import LOCAL_ROOT, login, publisher_repository
+from session import LOCAL_ROOT, login, publisher_repository, remove_legacy_username, steam_username, store_steam_username
 
 
 def gh(*arguments: str) -> str:
@@ -37,7 +37,9 @@ def inspect_setup(repository: str, sources: list[str]) -> tuple[list[str], set[s
 def setup(repository: str, sources: list[str], check: bool) -> None:
     private, secrets, variables = inspect_setup(repository, sources)
     source_missing = bool(private) and "SOURCE_RELEASES_TOKEN" not in secrets
-    steam_ready = "STEAM_SESSION_KEY" in secrets and "STEAM_USERNAME" in variables
+    legacy_username = "STEAM_USERNAME" in variables
+    username_secret = "STEAM_USERNAME" in secrets
+    steam_ready = "STEAM_SESSION_KEY" in secrets and (username_secret or legacy_username)
     print("Your existing local gh login is working. Local publishing reuses it; no extra GitHub token is needed locally.")
     print(f"This command configures publishing on GitHub's separate cloud worker in {repository}.")
     if private:
@@ -52,6 +54,8 @@ def setup(repository: str, sources: list[str], check: bool) -> None:
     else:
         print("Selected sources are public or none were requested. No extra source access token is needed.")
     print("Cloud Steam authentication is already configured." if steam_ready else "Cloud Steam authentication needs a one-time SteamCMD sign-in.")
+    if legacy_username:
+        print("The older Steam account variable needs migration to a masked Actions secret. No new Steam sign-in is needed for that change.")
     if check:
         print("Status only. No browser opened, credentials requested, or settings changed.")
         return
@@ -61,6 +65,13 @@ def setup(repository: str, sources: list[str], check: bool) -> None:
         webbrowser.open("https://github.com/settings/personal-access-tokens/new")
         print(f"Paste that token into gh's hidden prompt to store it in {repository}.")
         subprocess.run(["gh", "secret", "set", "SOURCE_RELEASES_TOKEN", "--repo", repository], check=True)
+    if legacy_username:
+        if username_secret:
+            remove_legacy_username(repository)
+        else:
+            username = steam_username(gh("api", f"repos/{repository}/actions/variables/STEAM_USERNAME", "--jq", ".value"))
+            store_steam_username(repository, username)
+        print("Steam account storage now uses a masked Actions secret; the old variable was removed.")
     if not steam_ready:
         login(LOCAL_ROOT, repository, github=True)
     else:

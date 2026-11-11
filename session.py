@@ -21,6 +21,25 @@ def command(arguments, **kwargs):
     return subprocess.run(arguments, check=True, timeout=180, **kwargs)
 
 
+def steam_username(value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_@.\-]{1,64}", value):
+        raise ValueError("Invalid Steam account login username")
+    return value
+
+
+def remove_legacy_username(repository: str) -> None:
+    names = command(["gh", "api", f"repos/{repository}/actions/variables", "--paginate", "--jq", ".variables[].name"],
+                    capture_output=True, text=True).stdout.splitlines()
+    if "STEAM_USERNAME" in names:
+        command(["gh", "variable", "delete", "STEAM_USERNAME", "--repo", repository], capture_output=True)
+
+
+def store_steam_username(repository: str, username: str) -> None:
+    command(["gh", "secret", "set", "STEAM_USERNAME", "--repo", repository], input=username,
+            text=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    remove_legacy_username(repository)
+
+
 def publisher_repository(explicit: str | None = None) -> str:
     repository = explicit or os.environ.get("GITHUB_REPOSITORY")
     if not repository:
@@ -136,9 +155,7 @@ def login(root: Path, repo: str | None, github: bool) -> None:
         repo = publisher_repository(repo)
     print("Steam Workshop sign-in", flush=True)
     print("Use the Steam account that owns your Workshop items. GitHub credentials are not used here.", flush=True)
-    username = input("Steam account login username (used to sign in to Steam): ").strip()
-    if not re.fullmatch(r"[A-Za-z0-9_@.\-]{1,64}", username):
-        raise ValueError("Invalid Steam account login username")
+    username = steam_username(input("Steam account login username (used to sign in to Steam): ").strip())
     install(root)
     environment = dict(os.environ, HOME=str(root))
     print("SteamCMD can reuse its existing Steam sign-in. If it asks for Password, enter your STEAM PASSWORD.", flush=True)
@@ -164,8 +181,7 @@ def login(root: Path, repo: str | None, github: bool) -> None:
         with key_file.open("rb") as key_input:
             command(["gh", "secret", "set", "STEAM_SESSION_KEY", "--repo", repo],
                     stdin=key_input, stdout=subprocess.DEVNULL)
-        command(["gh", "variable", "set", "STEAM_USERNAME", "--repo", repo, "--body", username],
-                stdout=subprocess.DEVNULL)
+        store_steam_username(repo, username)
         print("GitHub Steam authentication configured. Configure SOURCE_RELEASES_TOKEN separately for private releases.")
 
 
