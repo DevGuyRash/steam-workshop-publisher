@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 import content_files
 import desktop
@@ -33,6 +34,52 @@ class PortableCommands(unittest.TestCase):
     def cli(self, *args):
         return subprocess.run([sys.executable, *map(str, args)], cwd=ROOT,
                               capture_output=True, text=True, timeout=15)
+
+    def release_boundary(self, member="Contents/example.txt"):
+        assets = self.root / "assets"
+        assets.mkdir(exist_ok=True)
+        archive = assets / "ExampleMod-1.2.3.zip"
+        payload = b"verified release content"
+        with zipfile.ZipFile(archive, "w") as package:
+            package.writestr(member, payload)
+        (assets / "manifest.json").write_text(json.dumps({"id": "ExampleMod", "version": "1.2.3",
+            "archiveSha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+            "files": {member: hashlib.sha256(payload).hexdigest()}}), encoding="utf-8")
+        (assets / "release-notes.txt").write_bytes(b"Fixture change\r\nSecond line\r\n")
+        def github(*arguments):
+            if arguments[0] == "api":
+                value = ({"mod_id": "ExampleMod", "item_id": "1234", "app_id": "440", "archive": "ExampleMod-{version}.zip"}
+                         if "/contents/" in arguments[1]
+                         else {"tag_name": "v1.2.3", "draft": False, "prerelease": False, "published_at": "2026-01-01T00:00:00Z"})
+                return json.dumps(value).encode()
+            self.assertEqual(arguments[:2], ("release", "download"))
+            destination = Path(arguments[arguments.index("--dir") + 1])
+            for asset in assets.iterdir():
+                shutil.copyfile(asset, destination / asset.name)
+            return b""
+        return github
+
+    def test_release_preparation_and_default_upload_reach_desktop_with_verified_content(self):
+        stage = self.root / "stage"
+        def observed(app, **kwargs):
+            self.assertEqual(app, "440")
+            self.assertEqual(kwargs["item_id"], "1234")
+            self.assertEqual(kwargs["notes"], "Fixture change\nSecond line\n")
+            self.assertEqual((kwargs["content"] / "example.txt").read_bytes(), b"verified release content")
+        with patch.object(publisher, "gh", side_effect=self.release_boundary()), patch.object(desktop, "run", side_effect=observed) as run, patch.object(publisher, "send_to_steam") as steamcmd, patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("WORKSHOP_BACKEND", None)
+            publisher.prepare("owner/example-mod", "v1.2.3", None, None, stage)
+            publisher.upload(stage)
+            run.assert_called_once()
+            steamcmd.assert_not_called()
+
+    def test_release_rejects_windows_device_names_before_extraction(self):
+        for index, name in enumerate(("CONIN$", "CONOUT$", "COM¹", "LPT²", "CON .txt", "nested/LPT³.txt")):
+            stage = self.root / f"stage-{index}"
+            with self.subTest(name=name), patch.object(publisher, "gh", side_effect=self.release_boundary("Contents/" + name)):
+                with self.assertRaisesRegex(ValueError, "reserved Windows names"):
+                    publisher.prepare("owner/example-mod", "v1.2.3", None, None, stage)
+            self.assertFalse(stage.exists(), "Invalid names must be rejected before the stage is committed")
 
     def test_folder_and_package_commands_work_without_authentication(self):
         result = self.cli("folder.py", self.content, "--app-id", "440", "--item-id", "1234")
@@ -97,9 +144,12 @@ class PortableCommands(unittest.TestCase):
             steamcmd.assert_not_called()
 
     def test_portable_paths_reject_drives_streams_reserved_names_and_collisions(self):
-        for name in ("D:/escape", "file:stream", "dir/CON.txt", "file.", "file ", "../file", "dir\\file", "dir/a?b"):
+        for name in ("D:/escape", "file:stream", "dir/CON.txt", "file.", "file ", "../file", "dir\\file", "dir/a?b",
+                     "CONIN$", "CONOUT$", "COM¹", "LPT²", "CON .txt", "dir/lpt³.log"):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 publisher.package_path("Contents/" + name, publisher.Mod("owner/mod", "Example", "1234", "Example-{version}.zip"))
+        for name in ("console.txt", "com10.txt", "lpt-notes.txt"):
+            self.assertEqual(str(content_files.content_name(name)), name)
         for names in (("Contents/A/x", "Contents/a/y"), ("Contents/a", "Contents/a/x"), ("Contents/a/x", "Contents/a")):
             with self.subTest(names=names), self.assertRaises(ValueError):
                 content_files.check_names(names)
