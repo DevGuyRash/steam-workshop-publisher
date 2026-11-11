@@ -66,7 +66,7 @@ For a fork, update `REPOSITORY` in `session.py` and the repository arguments in 
 3. Retry the latest stable release with upload enabled. A retry targets the same item and same checked content.
 4. If an upload succeeds but session saving fails, renew the GitHub session before the next upload. A failed workflow can mean the upload completed and only its authentication refresh failed. Check the named step and Workshop update time.
 
-SteamCMD exit status alone does not establish an upload. The publisher also requires Steam's success result for the exact item. It fails closed on login requests, errors, timeouts, malformed archives, changed staged files, or a newer source release. It does not print raw Steam logs, so a Steam authentication problem requires a direct login in your own terminal. A canceled run or revoked login may also require renewal.
+SteamCMD exit status alone does not establish an upload. The publisher also requires Steam's success result for the exact item. It fails closed on login requests, errors, timeouts, malformed archives, changed staged files, or a newer source release. It does not print raw Steam logs, so a Steam authentication problem requires a direct login in your own terminal. A canceled run or revoked login may also require renewal. On the supported Linux launcher, Ctrl+C, SIGTERM, and SIGHUP stop the active SteamCMD process group and wait for its direct child to exit. The local release and folder commands use the same cancellation path. This cannot undo an upload already accepted by Steam; inspect the existing item before retrying. SIGKILL and a host crash cannot run process cleanup.
 
 ## Verify and retire a previous runner
 
