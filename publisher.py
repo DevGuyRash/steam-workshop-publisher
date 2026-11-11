@@ -118,9 +118,7 @@ def package_path(name: str, mod: Mod) -> PurePosixPath:
     if not isinstance(name, str):
         raise ValueError("Package member names must be strings")
     path = content_name(name)
-    if (not isinstance(name, str) or "\\" in name or any(ord(c) < 32 or ord(c) == 127 for c in name)
-            or path.is_absolute() or path.as_posix() != name or ".." in path.parts
-            or path.parts[:1] != ("Contents",) or len(path.parts) < 2):
+    if path.parts[:1] != ("Contents",) or len(path.parts) < 2:
         raise ValueError("Package members must be normal files under Contents/")
     return path
 

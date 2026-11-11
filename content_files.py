@@ -7,11 +7,12 @@ import stat
 
 def content_name(name: str) -> PurePosixPath:
     path = PurePosixPath(name)
-    reserved = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+    reserved = {"con", "prn", "aux", "nul", "conin$", "conout$",
+                *(f"com{i}" for i in "123456789¹²³"), *(f"lpt{i}" for i in "123456789¹²³")}
     if (not name or path.is_absolute() or path.as_posix() != name or ".." in path.parts
             or any(ord(char) < 32 or ord(char) == 127 for char in name)
             or any(char in name for char in '\\:<>"|?*')
-            or any(part.endswith((".", " ")) or part.split(".")[0].lower() in reserved for part in path.parts)):
+            or any(part.endswith((".", " ")) or part.split(".")[0].rstrip(" ").lower() in reserved for part in path.parts)):
         raise ValueError("Content names must be portable relative paths without drives, streams, or reserved Windows names")
     return path
 
