@@ -92,14 +92,34 @@ else:
 
     def test_local_steam_login_does_not_require_or_inspect_github_authentication(self):
         steam = self.root / "steamcmd"
-        (steam / "config").mkdir(parents=True)
-        (steam / "config/config.vdf").write_text('"fixture" "not-real-authentication"\n')
+        (steam / "Steam/config").mkdir(parents=True)
+        (steam / "Steam/config/config.vdf").write_text('"fixture" "not-real-authentication"\n')
         launcher = steam / "steamcmd.sh"
         launcher.write_text("#!/bin/sh\nexit 0\n")
         launcher.chmod(0o700)
         result = subprocess.run([sys.executable, str(self.root / "session.py"), "login", "--root", str(steam)],
                                 env=self.env, input="test_account\n", capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.root / "calls.jsonl").exists())
+        self.assertIn("Steam account login username", result.stdout)
+        self.assertIn("STEAM PASSWORD", result.stdout)
+        self.assertIn("STEAM GUARD", result.stdout)
+
+    def test_failed_steam_login_explains_credentials_without_changing_cloud_settings(self):
+        steam = self.root / "steamcmd"
+        steam.mkdir()
+        launcher = steam / "steamcmd.sh"
+        launcher.write_text("#!/bin/sh\nexit 7\n")
+        launcher.chmod(0o700)
+        result = subprocess.run([sys.executable, str(self.root / "session.py"), "login", "--root", str(steam),
+                                 "--github", "--repo", "ExampleOwner/SharedPublisher"],
+                                env=self.env, input="test_account\n", capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Steam sign-in failed", result.stdout)
+        self.assertIn("Steam account login username and Steam password", result.stdout)
+        self.assertIn("No cloud credentials were changed", result.stdout)
+        self.assertFalse((steam / "username").exists())
+        self.assertFalse((steam / "github-session-key.txt").exists())
         self.assertFalse((self.root / "calls.jsonl").exists())
 
 
