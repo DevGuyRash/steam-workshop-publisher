@@ -23,7 +23,7 @@ Use this manifest shape. Compute hashes from the finished archive and the exact 
 }
 ```
 
-The packager accepts regular files from any content folder and rejects symlinks, Git metadata, and environment files. Select only the files you intend to upload. It does not build or test your mod. AutoMindful's `tools/verify.py` builds and tests this format. Its release workflow attaches the checked assets. Wait for that build before requesting a Workshop upload. Drafts, prereleases, and an older release cannot publish through the shared publisher.
+The packager accepts regular files from any content folder and rejects symlinks, Git, Mercurial, and Subversion metadata (`.git`, `.hg`, and `.svn`), and environment files. These metadata paths are rejected at every depth, before creating release assets, just as in local folder publishing. Select only the files you intend to upload. It does not build or test your mod. AutoMindful's `tools/verify.py` builds and tests this format. Its release workflow attaches the checked assets. Wait for that build before requesting a Workshop upload. Drafts, prereleases, and an older release cannot publish through the shared publisher.
 
 ## Register another mod
 

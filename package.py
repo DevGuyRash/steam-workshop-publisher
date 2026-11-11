@@ -20,8 +20,8 @@ def build(content: Path, mod_id: str, version: str, output: Path, notes: str) ->
     files = {}
     for path in sorted(content.rglob("*")):
         relative = path.relative_to(content)
-        if any(part == ".git" or part == ".env" or part.startswith(".env.") for part in relative.parts):
-            raise ValueError("Select the content folder, excluding Git and environment files")
+        if any(part in {".git", ".hg", ".svn"} or part == ".env" or part.startswith(".env.") for part in relative.parts):
+            raise ValueError("Select the content folder, excluding version-control metadata and environment files")
         if path.is_symlink() or not (path.is_dir() or stat.S_ISREG(path.stat().st_mode)):
             raise ValueError("Content must contain only regular files and directories")
         if path.is_file():
