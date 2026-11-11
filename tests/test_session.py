@@ -18,9 +18,9 @@ class EncryptedSession(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "source"
-            (source / "config").mkdir(parents=True)
+            (source / "Steam/config").mkdir(parents=True)
             fixture = b'"test-fixture" "no-real-credentials"\n'
-            (source / "config/config.vdf").write_bytes(fixture)
+            (source / "Steam/config/config.vdf").write_bytes(fixture)
             key = root / "key"
             subprocess.run(["age-keygen", "-o", str(key)], check=True, capture_output=True)
             fake_gh = root / "gh"
@@ -64,8 +64,8 @@ else:
                 target = root / "target"
                 with patch.object(session, "install", lambda path: path.mkdir(mode=0o700)):
                     session.restore(target, key, "example/publisher")
-                self.assertEqual((target / "config/config.vdf").read_bytes(), fixture)
-                self.assertEqual((target / "config/config.vdf").stat().st_mode & 0o777, 0o600)
+                self.assertEqual((target / "Steam/config/config.vdf").read_bytes(), fixture)
+                self.assertEqual((target / "Steam/config/config.vdf").stat().st_mode & 0o777, 0o600)
                 damaged = bytearray(ciphertext)
                 damaged[-10] ^= 1
                 (root / "release" / asset).write_bytes(damaged)
