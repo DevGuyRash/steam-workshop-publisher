@@ -4,6 +4,8 @@ Publish an existing mod folder or a checked GitHub release to Steam Workshop. Lo
 
 This repository contains only shared publishing tools. Each mod keeps its settings in its own source repository. The cloud workflow takes a source repository and release tag; it downloads data and never executes that repository's code.
 
+For another mod, start with the [agent quickstart](docs/agent-quickstart.md). Local folder uploads need no registration or GitHub setup. An existing Workshop item is required; initial item creation stays with the game's supported uploader.
+
 Install Python 3.12+ and sign in through your desktop Steam client. These commands use the same account. On Windows, use `python` or `py -3.12` in place of `python3`. GitHub CLI is needed for release downloads; folder uploads need only Python and Steam. `just` supplies optional POSIX-shell shortcuts.
 
 ```sh
