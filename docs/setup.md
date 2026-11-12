@@ -2,6 +2,8 @@
 
 Use this guide for an existing Steam Workshop item. Each mod owns its configuration and release assets. The shared publisher accepts a source repository and stable tag, so it needs no permanent mod registrations.
 
+For the shortest local path or an agent handoff, follow the [agent quickstart](agent-quickstart.md). Use the release and cloud sections below when those distribution paths are needed.
+
 ## Publish a local content folder
 
 1. Install Python 3.12+ and sign in through the desktop Steam client. Local folder publishing works on Windows x64, macOS Intel/Apple Silicon, and Linux x64/ARM64 with an accessible compatible Steam client. On Windows, replace `python3` with `python` or `py -3.12` in the commands below. `just` recipes are optional POSIX-shell shortcuts; direct Python commands are the portable interface.
@@ -62,7 +64,7 @@ Content also rejects Windows junctions/reparse points and names that cannot be r
 
 ## Enable the cloud publisher
 
-SteamCMD signs in separately as the publishing account and can replace its existing Steam client or game session. Cached credentials remove the password prompt; they do not isolate the account session. Plan manual cloud uploads for times when this is acceptable. [Valve's session-response documentation](https://partner.steamgames.com/doc/api/steam_api#EAuthSessionResponse) describes these disconnections. Use the game's desktop-session uploader instead when you need to keep the current Steam session intact.
+SteamCMD signs in separately as the publishing account and can replace its existing Steam client or game session. Cached credentials remove the password prompt; they do not isolate the account session. Plan manual cloud uploads for times when this is acceptable. [Valve's session-response documentation](https://partner.steamgames.com/doc/api/steam_api#EAuthSessionResponse) describes these disconnections. Use this publisher locally with `--backend desktop` when you need to reuse the current Steam session.
 
 1. Keep the shared publisher repository public to use free standard GitHub-hosted workers. Source repositories can be public or private.
 2. Run `just setup-github --check --source owner/example-mod` to inspect missing cloud settings without prompts or changes. Local commands and workflow dispatch reuse your existing `gh` login.
