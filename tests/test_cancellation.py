@@ -29,7 +29,7 @@ class Cancellation(unittest.TestCase):
         self.marker = self.root / 'continued-upload'
         child = f"import pathlib,time; time.sleep(0.8); pathlib.Path({str(self.marker)!r}).write_text('continued'); time.sleep(30)"
         launcher = self.steam / 'steamcmd.sh'
-        launcher.write_text(f'''#!/usr/bin/env python3
+        launcher.write_text(f'''#!{sys.executable}
 import os,pathlib,subprocess,sys,time
 print('private-log-canary', flush=True)
 subprocess.Popen([sys.executable, '-c', {child!r}])
