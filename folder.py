@@ -3,13 +3,17 @@
 import argparse
 import hashlib
 from pathlib import Path
+import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 
 from content_files import check_names, content_name, content_tree, read_regular, regular_stat
-from publisher import MAX_BYTES, MAX_FILES, add_backend_arguments, positive_id, publish_content, workshop_vdf
+from publisher import MAX_BYTES, MAX_FILES, add_backend_arguments, positive_id, positive_timeout, publish_content, workshop_vdf
 from session import LOCAL_ROOT
+
+UPLOAD_ROOT = LOCAL_ROOT.parent / "uploads"
 
 
 def content_source(path: Path, app_id: str | None, item_id: str | None) -> tuple[Path, str, str]:
@@ -72,10 +76,18 @@ def snapshot(source: Path, destination: Path) -> tuple[int, str]:
 
 def publish_folder(path: Path, app_id: str | None, item_id: str | None, steamcmd_dir: Path,
                    username: str | None, notes: str, publish: bool, *, backend: str | None = None,
-                   runtime_dir: Path | None = None, offline: bool = False) -> None:
+                   runtime_dir: Path | None = None, offline: bool = False, timeout: float = 180) -> None:
+    timeout = positive_timeout(timeout)
     source, app_id, item_id = content_source(path, app_id, item_id)
-    with tempfile.TemporaryDirectory(prefix="workshop-folder-") as temporary:
-        stage = Path(temporary)
+    if publish:
+        UPLOAD_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+        regular_stat(UPLOAD_ROOT)
+        UPLOAD_ROOT.chmod(0o700)
+        stage = Path(tempfile.mkdtemp(prefix="upload-", dir=UPLOAD_ROOT))
+    else:
+        stage = Path(tempfile.mkdtemp(prefix="workshop-folder-"))
+    retained = False
+    try:
         content = stage / "Contents"
         count, fingerprint = snapshot(source, content)
         upload = stage / "upload.vdf"
@@ -83,9 +95,20 @@ def publish_folder(path: Path, app_id: str | None, item_id: str | None, steamcmd
         print(f"Validated {count} files for Steam app {app_id}, existing Workshop item {item_id}")
         print(f"Content SHA256: {fingerprint}")
         if publish:
+            print(f"Upload snapshot: {stage}", flush=True)
+            retained = True
             publish_content(content, app_id, item_id, notes, upload, backend=backend,
-                            steamcmd_dir=steamcmd_dir, username=username, runtime_dir=runtime_dir, offline=offline)
+                            steamcmd_dir=steamcmd_dir, username=username, runtime_dir=runtime_dir, offline=offline,
+                            timeout=timeout)
+            retained = False
             print(f"Published content to existing Workshop item {item_id}")
+    finally:
+        if retained:
+            print(f"Upload snapshot retained at {stage}. Steam may still be reading these files. "
+                  "Check the Workshop item and upload status before retrying or removing this directory.",
+                  file=sys.stderr, flush=True)
+        else:
+            shutil.rmtree(stage)
 
 
 def main() -> None:
@@ -96,6 +119,8 @@ def main() -> None:
     parser.add_argument("--steamcmd-dir", type=Path, default=LOCAL_ROOT)
     parser.add_argument("--username")
     parser.add_argument("--notes-file", type=Path)
+    parser.add_argument("--timeout", type=float, default=180,
+                        help="Positive finite seconds to wait for upload confirmation (default: 180)")
     add_backend_arguments(parser)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--publish", action="store_true")
@@ -104,7 +129,8 @@ def main() -> None:
     try:
         notes = args.notes_file.read_text(encoding="utf-8") if args.notes_file else ""
         publish_folder(args.folder, args.app_id or None, args.item_id or None, args.steamcmd_dir.expanduser(),
-                       args.username, notes, args.publish, backend=args.backend, runtime_dir=args.runtime_dir, offline=args.offline)
+                       args.username, notes, args.publish, backend=args.backend, runtime_dir=args.runtime_dir,
+                       offline=args.offline, timeout=args.timeout)
     except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
         parser.exit(1, f"Publisher stopped: {error}\n")
 

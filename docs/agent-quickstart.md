@@ -44,6 +44,8 @@ python3 folder.py "/path/to/content" --app-id 123456 --item-id 1234567890 --publ
 
 Replace both example IDs. `--notes-file /path/to/notes.txt` adds change notes to a folder upload. Package only the intended Workshop files; repository metadata, credentials, saves, and downloaded dependencies belong outside that folder.
 
+Folder uploads wait up to 180 seconds for confirmation. Add `--timeout 600` when a longer wait is needed. If a backend attempt fails or is interrupted, the publisher retains a private content snapshot and prints its exact path. Keep those files until Steam's upload status is settled, and inspect the existing item before retrying. See [upload behavior and failures](desktop.md#upload-behavior-and-failures) for cleanup details.
+
 ## Keep desktop Steam as the local default
 
 With no override, local uploads use `auto`, which tries the current desktop session and stops if it is unavailable. It never falls back to SteamCMD. An explicit `--backend` overrides `WORKSHOP_BACKEND`. The commands above pin `desktop` so an inherited environment setting cannot request a separate login.
@@ -62,6 +64,8 @@ python3 local.py owner/example-mod v1.2.3 --publish --backend desktop
 ```
 
 Replace the source repository and tag. This route uses your existing GitHub CLI login. Local folder publishing does not need this setup.
+
+The local release command also retains and reports its checked stage after an uncertain upload attempt. Keep that snapshot unchanged until Steam's upload status is settled. See [upload behavior and failures](desktop.md#upload-behavior-and-failures) for cleanup details.
 
 GitHub-hosted publishing uses a separate SteamCMD session. Configure that path only when the user requests headless or cloud publishing, following [cloud setup](setup.md#enable-the-cloud-publisher). Public source repositories need no extra source token. Private sources need the documented cloud read credential. Neither path requires per-mod code in this publisher.
 
