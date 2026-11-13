@@ -4,6 +4,7 @@ import argparse
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -37,6 +38,12 @@ class Mod:
 def positive_id(value: str, bits: int, label: str) -> str:
     if not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]*", value) or int(value) >= 2**bits:
         raise ValueError(f"{label} requires a positive decimal ID")
+    return value
+
+
+def positive_timeout(value: float) -> float:
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("Upload timeout must be a positive finite number of seconds")
     return value
 
 
@@ -322,14 +329,15 @@ def add_backend_arguments(parser) -> None:
 
 def publish_content(content: Path, app_id: str, item_id: str, notes: str, vdf_path: Path, *,
                     backend: str | None = None, steamcmd_dir: Path | None = None, username: str | None = None,
-                    runtime_dir: Path | None = None, offline: bool = False) -> None:
+                    runtime_dir: Path | None = None, offline: bool = False, timeout: float = 180) -> None:
+    timeout = positive_timeout(timeout)
     backend = backend if backend is not None else os.environ.get("WORKSHOP_BACKEND", "auto")
     if backend not in {"auto", "desktop", "steamcmd"}:
         raise ValueError("WORKSHOP_BACKEND must be auto, desktop, or steamcmd")
     if backend in {"auto", "desktop"}:
         from desktop import run
         print("Using the existing desktop Steam session; no separate login or SteamCMD fallback.", flush=True)
-        run(app_id, content=content, item_id=item_id, notes=notes, runtime=runtime_dir, offline=offline)
+        run(app_id, content=content, item_id=item_id, notes=notes, runtime=runtime_dir, offline=offline, timeout=timeout)
         return
     if not sys.platform.startswith("linux"):
         raise ValueError("The SteamCMD backend is Linux-only. Select desktop or use the explicit GitHub workflow")
@@ -341,7 +349,7 @@ def publish_content(content: Path, app_id: str, item_id: str, notes: str, vdf_pa
             raise ValueError("Run just login in your own terminal before explicit SteamCMD publishing")
         username = account_file.read_text(encoding="utf-8").strip()
     print("Using a separate SteamCMD login; this may replace another Steam client or game session.", flush=True)
-    send_to_steam(vdf_path, item_id, steamcmd_dir, username)
+    send_to_steam(vdf_path, item_id, steamcmd_dir, username, timeout=timeout)
 
 
 def upload(stage: Path, steamcmd_dir: Path | None = None, username: str | None = None, *,

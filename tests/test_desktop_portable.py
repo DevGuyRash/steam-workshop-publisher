@@ -27,12 +27,16 @@ class PortableCommands(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="desktop-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        uploads = patch.object(folder, "UPLOAD_ROOT", self.root / "uploads")
+        uploads.start()
+        self.addCleanup(uploads.stop)
         self.content = self.root / "content"
         self.content.mkdir()
         (self.content / "example.txt").write_text("portable content", encoding="utf-8")
 
     def cli(self, *args):
         return subprocess.run([sys.executable, *map(str, args)], cwd=ROOT,
+                              env={**os.environ, "HOME": str(self.root), "USERPROFILE": str(self.root)},
                               capture_output=True, text=True, timeout=15)
 
     def release_boundary(self, member="Contents/example.txt"):
