@@ -65,6 +65,8 @@ python3 local.py owner/example-mod v1.2.3 --publish --backend desktop
 
 Replace the source repository and tag. This route uses your existing GitHub CLI login. Local folder publishing does not need this setup.
 
+The local release command also retains and reports its checked stage after an uncertain upload attempt. Keep that snapshot unchanged until Steam's upload status is settled. See [upload behavior and failures](desktop.md#upload-behavior-and-failures) for cleanup details.
+
 GitHub-hosted publishing uses a separate SteamCMD session. Configure that path only when the user requests headless or cloud publishing, following [cloud setup](setup.md#enable-the-cloud-publisher). Public source repositories need no extra source token. Private sources need the documented cloud read credential. Neither path requires per-mod code in this publisher.
 
 See [fresh agent handoff verification](handoff-verification.md) for the exercised workflows and their limits. The trials cover preparation without publishing; live item updates remain outside that verification scope.
