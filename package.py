@@ -3,9 +3,12 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import shutil
 import stat
+import tempfile
 import zipfile
 
 from publisher import MAX_BYTES, MAX_FILES, release_version
@@ -31,24 +34,58 @@ def build(content: Path, mod_id: str, version: str, output: Path, notes: str) ->
     if not files or len(files) > MAX_FILES or sum(path.stat().st_size for path in files.values()) > MAX_BYTES:
         raise ValueError("Content is empty or exceeds the package size limit")
     check_names(files)
-    output.mkdir(parents=True, exist_ok=False)
-    archive = output / f"{mod_id}-{version}.zip"
-    manifest = {}
-    total = 0
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as package:
-        for name, path in files.items():
-            data = read_regular(path, MAX_BYTES - total)
-            total += len(data)
-            if total > MAX_BYTES:
-                raise ValueError("Content grew beyond the package size limit")
-            member = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
-            member.compress_type = zipfile.ZIP_DEFLATED
-            member.external_attr = 0o100644 << 16
-            package.writestr(member, data)
-            manifest[name] = hashlib.sha256(data).hexdigest()
-    (output / "manifest.json").write_text(json.dumps({"id": mod_id, "version": version,
-        "archiveSha256": hashlib.sha256(archive.read_bytes()).hexdigest(), "files": manifest}, indent=2) + "\n")
-    (output / "release-notes.txt").write_text(notes, encoding="utf-8")
+    # Build complete artifacts before reserving the destination, and roll back
+    # handled commit failures. mkdir reserves it without replacing an existing
+    # (even empty) directory, unlike a directory rename on POSIX.
+    if output.exists() or output.is_symlink():
+        raise FileExistsError(f"Output already exists: {output}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".package-", dir=output.parent) as temporary:
+        stage = Path(temporary)
+        archive = stage / f"{mod_id}-{version}.zip"
+        manifest = {}
+        total = 0
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as package:
+            for name, path in files.items():
+                data = read_regular(path, MAX_BYTES - total)
+                total += len(data)
+                if total > MAX_BYTES:
+                    raise ValueError("Content grew beyond the package size limit")
+                member = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+                member.compress_type = zipfile.ZIP_DEFLATED
+                member.external_attr = 0o100644 << 16
+                package.writestr(member, data)
+                manifest[name] = hashlib.sha256(data).hexdigest()
+        (stage / "manifest.json").write_text(json.dumps({"id": mod_id, "version": version,
+            "archiveSha256": hashlib.sha256(archive.read_bytes()).hexdigest(), "files": manifest}, indent=2) + "\n")
+        (stage / "release-notes.txt").write_text(notes, encoding="utf-8")
+        output.mkdir(exist_ok=False)
+        owned = output.lstat()
+        moved = []
+        try:
+            for artifact in stage.iterdir():
+                destination = output / artifact.name
+                with destination.open("xb") as target:
+                    moved.append((destination, os.fstat(target.fileno())))
+                    with artifact.open("rb") as source:
+                        shutil.copyfileobj(source, target)
+        except BaseException:
+            # Never remove a destination that was replaced by another process.
+            try:
+                current = output.lstat()
+                if (current.st_dev, current.st_ino) == (owned.st_dev, owned.st_ino):
+                    for destination, identity in moved:
+                        try:
+                            current_file = destination.lstat()
+                            if (current_file.st_dev, current_file.st_ino) == (identity.st_dev, identity.st_ino):
+                                destination.unlink()
+                        except FileNotFoundError:
+                            pass
+                    output.rmdir()
+            except OSError:
+                pass
+            raise
+    archive = output / archive.name
     print(f"Packaged {len(files)} files in {archive}. Attach all three files to GitHub release v{version}.")
 
 
