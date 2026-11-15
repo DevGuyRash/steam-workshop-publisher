@@ -11,12 +11,14 @@ import stat
 import tempfile
 import zipfile
 
-from publisher import MAX_BYTES, MAX_FILES, release_version
+from publisher import MAX_BYTES, MAX_FILES, release_notes, release_version
 from content_files import check_names, content_name, content_tree, read_regular, regular_stat
 
 
 def build(content: Path, mod_id: str, version: str, output: Path, notes: str) -> None:
     release_version("v" + version)
+    notes_bytes = notes.encode("utf-8")
+    release_notes(notes_bytes)
     if not re.fullmatch(r"[A-Za-z0-9_-]+", mod_id):
         raise ValueError("Use a mod ID containing letters, digits, underscores, or hyphens")
     if not content.is_dir():
@@ -58,7 +60,7 @@ def build(content: Path, mod_id: str, version: str, output: Path, notes: str) ->
                 manifest[name] = hashlib.sha256(data).hexdigest()
         (stage / "manifest.json").write_text(json.dumps({"id": mod_id, "version": version,
             "archiveSha256": hashlib.sha256(archive.read_bytes()).hexdigest(), "files": manifest}, indent=2) + "\n")
-        (stage / "release-notes.txt").write_text(notes, encoding="utf-8")
+        (stage / "release-notes.txt").write_bytes(notes_bytes)
         output.mkdir(exist_ok=False)
         owned = output.lstat()
         moved = []
