@@ -24,6 +24,7 @@ MAX_BYTES = int(os.environ.get("WORKSHOP_MAX_BYTES", "1073741824"))
 if MAX_BYTES < 1:
     raise ValueError("WORKSHOP_MAX_BYTES must be positive")
 MAX_FILES = 10000
+MAX_RELEASE_NOTES_BYTES = 65536
 
 
 @dataclass(frozen=True)
@@ -149,6 +150,15 @@ def vdf_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t") + '"'
 
 
+def release_notes(data: bytes) -> str:
+    """Validate the existing release-asset contract, not a Steam API limit."""
+    if len(data) > MAX_RELEASE_NOTES_BYTES:
+        raise ValueError("Release change notes exceed the supported size")
+    notes = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    vdf_string(notes)
+    return notes
+
+
 def workshop_vdf(app_id: str, item_id: str, content: Path, notes: str) -> str:
     values = {"appid": app_id, "publishedfileid": item_id,
               "contentfolder": str(content), "changenote": notes.replace("\r\n", "\n").replace("\r", "\n")}
@@ -182,7 +192,7 @@ def prepare(source: str, tag: str, archive_hash: str | None, notes_hash: str | N
         archive = downloads / archive_name
         manifest_path = downloads / "manifest.json"
         notes_path = downloads / "release-notes.txt"
-        if archive.stat().st_size > MAX_BYTES or manifest_path.stat().st_size > 2 * 1024 * 1024 or notes_path.stat().st_size > 65536:
+        if archive.stat().st_size > MAX_BYTES or manifest_path.stat().st_size > 2 * 1024 * 1024 or notes_path.stat().st_size > MAX_RELEASE_NOTES_BYTES:
             raise ValueError("Release assets exceed the supported size")
         actual_archive_hash = digest(archive.read_bytes())
         actual_notes_hash = digest(notes_path.read_bytes())
@@ -211,7 +221,7 @@ def prepare(source: str, tag: str, archive_hash: str | None, notes_hash: str | N
                 destination = stage.joinpath(*path.parts)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(data)
-        notes = notes_path.read_text(encoding="utf-8")
+        notes = release_notes(notes_path.read_bytes())
         (stage / "release-notes.txt").write_bytes(notes_path.read_bytes())
         (stage / "manifest.json").write_bytes(manifest_path.read_bytes())
         (stage / "stage.json").write_text(json.dumps({"source": mod.source, "tag": tag,

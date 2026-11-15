@@ -39,14 +39,14 @@ class PackageRecovery(unittest.TestCase):
                 self.output.rmdir()
 
     def test_metadata_failures_are_retryable(self):
-        original = Path.write_text
-        for filename in ('manifest.json', 'release-notes.txt'):
+        for filename, method in (('manifest.json', 'write_text'), ('release-notes.txt', 'write_bytes')):
             with self.subTest(filename=filename):
+                original = getattr(Path, method)
                 def write(path, *args, **kwargs):
                     if path.name == filename:
                         raise OSError('injected')
                     return original(path, *args, **kwargs)
-                with patch.object(Path, 'write_text', write):
+                with patch.object(Path, method, write):
                     with self.assertRaisesRegex(OSError, 'injected'):
                         self.build()
                 self.assert_retry()
