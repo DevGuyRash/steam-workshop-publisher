@@ -1,6 +1,7 @@
 """Producer/consumer contract journeys; fake GitHub, no Steam uploads."""
 import contextlib
 import io
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -11,6 +12,8 @@ import unittest
 import test_publisher
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import package
+import desktop
+from unittest.mock import patch
 import publisher
 
 
@@ -55,6 +58,38 @@ class ReleaseNotesContract(unittest.TestCase):
         with self.assertRaises(ValueError):
             publisher.release_notes(b'x' * 65535 + b'\r\n')
         self.assertEqual(publisher.release_notes(b'first\r\nsecond\rthird'), 'first\nsecond\nthird')
+
+    def test_desktop_rejects_invalid_notes_before_runtime_or_helper(self):
+        for notes in ("x" * 65537, "é" * 32768 + "x", "x" * 65535 + "\r\n",
+                      "bad\0notes", "bad\x1fnotes", "bad\x7fnotes", "\ud800"):
+            with self.subTest(prefix=repr(notes[:8])):
+                with patch.object(desktop, "install") as install, \
+                     patch.object(desktop.subprocess, "Popen") as helper:
+                    with self.assertRaises(ValueError):
+                        desktop.run("108600", notes=notes)
+                install.assert_not_called()
+                helper.assert_not_called()
+
+    def test_desktop_accepts_exact_raw_boundary_before_runtime(self):
+        for notes in ("x" * 65536, "é" * 32768, "x" * 65534 + "\r\n"):
+            with self.subTest(size=len(notes.encode("utf-8"))):
+                with patch.object(desktop, "install", side_effect=RuntimeError("runtime sentinel")) as install:
+                    with self.assertRaisesRegex(RuntimeError, "runtime sentinel"):
+                        desktop.run("108600", notes=notes)
+                install.assert_called_once()
+
+    def test_desktop_helper_receives_normalized_notes(self):
+        notes = 'quoted "note"\\path\r\nnext\rline\tend'
+        def inspect_request(command, **kwargs):
+            request = Path(command[command.index("--request") + 1])
+            self.assertEqual(json.loads(request.read_text())["notes"],
+                             notes.replace("\r\n", "\n").replace("\r", "\n"))
+            raise RuntimeError("helper sentinel")
+        with patch.object(desktop, "install"), \
+             patch.object(desktop.subprocess, "Popen", side_effect=inspect_request) as helper:
+            with self.assertRaisesRegex(RuntimeError, "helper sentinel"):
+                desktop.run("108600", notes=notes)
+        helper.assert_called_once()
 
     def test_cli_rejects_invalid_notes_without_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
