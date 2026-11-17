@@ -151,7 +151,7 @@ def vdf_string(value: str) -> str:
 
 
 def release_notes(data: bytes) -> str:
-    """Validate the existing release-asset contract, not a Steam API limit."""
+    """Validate the shared publisher notes contract, not a Steam API limit."""
     if len(data) > MAX_RELEASE_NOTES_BYTES:
         raise ValueError("Release change notes exceed the supported size")
     notes = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")

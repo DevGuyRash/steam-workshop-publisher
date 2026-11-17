@@ -44,6 +44,8 @@ python3 folder.py "/path/to/content" --app-id 123456 --item-id 1234567890 --publ
 
 Replace both example IDs. `--notes-file /path/to/notes.txt` adds change notes to a folder upload. Package only the intended Workshop files; repository metadata, credentials, saves, and downloaded dependencies belong outside that folder.
 
+Change notes must be valid UTF-8, at most 65,536 bytes before newline normalization, with no unsupported control characters (tabs and newlines are allowed). CRLF and CR line endings are normalized to LF after the size check. This is the publisher’s shared input contract for release and folder uploads, including explicitly selected SteamCMD uploads, not a claim about Steam API limits. Folder validation rejects invalid notes before creating or copying an upload snapshot.
+
 Folder uploads wait up to 180 seconds for confirmation. Add `--timeout 600` when a longer wait is needed. If a backend attempt fails or is interrupted, the publisher retains a private content snapshot and prints its exact path. Keep those files until Steam's upload status is settled, and inspect the existing item before retrying. See [upload behavior and failures](desktop.md#upload-behavior-and-failures) for cleanup details.
 
 ## Keep desktop Steam as the local default
