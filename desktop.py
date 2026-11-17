@@ -15,7 +15,7 @@ import time
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from publisher import positive_id
+from publisher import positive_id, release_notes
 from steam_runtime import install, runtime_root
 
 RESULT_PREFIX = "WORKSHOP_DESKTOP_RESULT="
@@ -114,8 +114,7 @@ def run(app_id: str, *, content: Path | None = None, item_id: str | None = None,
         content = content.resolve(strict=True)
         if not content.is_dir():
             raise ValueError("Choose an existing content directory")
-    if "\0" in notes or len(notes.encode("utf-8")) > 65536:
-        raise ValueError("Change notes exceed 64 KiB or contain a null character")
+    notes = release_notes(notes.encode("utf-8"))
     root = runtime_root(runtime)
     install(root, offline=offline)
     cancelled = None
