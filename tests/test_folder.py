@@ -130,6 +130,53 @@ print('Success. Published item 1234.')
         run.assert_not_called()
         self.assertEqual(list(self.uploads.iterdir()), [])
 
+    def test_invalid_notes_fail_before_staging_snapshot_or_backend(self):
+        invalid = ("x" * 65537, "é" * 32768 + "x", "x" * 65535 + "\r\n",
+                   "bad\0notes", "bad\x1fnotes", "bad\x7fnotes", "\ud800")
+        for backend in ("desktop", "steamcmd"):
+            for publish in (False, True):
+                for notes in invalid:
+                    with self.subTest(backend=backend, publish=publish, prefix=repr(notes[:8])):
+                        with patch.object(folder.tempfile, "mkdtemp") as stage, \
+                             patch.object(folder, "snapshot") as snapshot, \
+                             patch.object(folder, "publish_content") as backend_call:
+                            with self.assertRaises(ValueError):
+                                folder.publish_folder(self.workshop, None, None, self.root / "steamcmd",
+                                                      None, notes, publish, backend=backend)
+                        stage.assert_not_called()
+                        snapshot.assert_not_called()
+                        backend_call.assert_not_called()
+                        self.assertFalse(self.uploads.exists())
+
+    def test_valid_note_boundaries_are_normalized_for_vdf_and_backend(self):
+        for notes in ("", "x" * 65536, "é" * 32768, "x" * 65534 + "\r\n",
+                      'quoted "note"\\path\r\nnext\rline\tend'):
+            normalized = notes.replace("\r\n", "\n").replace("\r", "\n")
+            for backend in ("desktop", "steamcmd"):
+                with self.subTest(size=len(notes.encode("utf-8")), backend=backend):
+                    def publish(content, app_id, item_id, passed_notes, upload, **kwargs):
+                        self.assertEqual(passed_notes, normalized)
+                        self.assertIn(publisher.vdf_string(normalized), upload.read_text())
+                    with patch.object(folder, "publish_content", side_effect=publish) as backend_call:
+                        folder.publish_folder(self.workshop, None, None, self.root / "steamcmd",
+                                              None, notes, True, backend=backend)
+                    backend_call.assert_called_once()
+                    self.assertEqual(list(self.uploads.iterdir()), [])
+
+    def test_cli_counts_raw_utf8_file_bytes_before_newline_normalization(self):
+        notes_file = self.root / "notes.txt"
+        for data in (b"x" * 65537, "é".encode("utf-8") * 32768 + b"x",
+                     b"x" * 65535 + b"\r\n", b"invalid\xff"):
+            notes_file.write_bytes(data)
+            for mode in ("--dry-run", "--publish"):
+                output = self.run_cli(self.workshop, mode, "--notes-file", notes_file, success=False)
+                self.assertIn("Publisher stopped", output)
+                self.assertNotIn("Validated", output)
+                self.assertNotIn("Upload snapshot", output)
+        for data in (b"x" * 65536, "é".encode("utf-8") * 32768, b"x" * 65534 + b"\r\n"):
+            notes_file.write_bytes(data)
+            self.assertIn("Validated 1 files", self.run_cli(self.workshop, "--dry-run", "--notes-file", notes_file))
+
     def test_all_post_handoff_failures_retain_and_report_the_private_snapshot(self):
         for error in (RuntimeError("Upload timed out"), ValueError("Malformed callback"), SystemExit(130), KeyboardInterrupt()):
             with self.subTest(error=type(error).__name__):
