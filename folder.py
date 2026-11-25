@@ -10,7 +10,8 @@ import sys
 import tempfile
 
 from content_files import check_names, content_name, content_tree, read_regular, regular_stat
-from publisher import MAX_BYTES, MAX_FILES, add_backend_arguments, positive_id, positive_timeout, publish_content, release_notes, workshop_vdf
+from publisher import (MAX_BYTES, MAX_FILES, add_backend_arguments, add_description_argument, listing_description, positive_id,
+                       positive_timeout, publish_content, read_description, release_notes, workshop_vdf)
 from session import LOCAL_ROOT
 
 UPLOAD_ROOT = LOCAL_ROOT.parent / "uploads"
@@ -76,8 +77,11 @@ def snapshot(source: Path, destination: Path) -> tuple[int, str]:
 
 def publish_folder(path: Path, app_id: str | None, item_id: str | None, steamcmd_dir: Path,
                    username: str | None, notes: str, publish: bool, *, backend: str | None = None,
-                   runtime_dir: Path | None = None, offline: bool = False, timeout: float = 180) -> None:
+                   runtime_dir: Path | None = None, offline: bool = False, timeout: float = 180,
+                   description: str | None = None) -> None:
     notes = release_notes(notes.encode("utf-8"))
+    if description is not None:
+        description = listing_description(description.encode("utf-8"))
     timeout = positive_timeout(timeout)
     source, app_id, item_id = content_source(path, app_id, item_id)
     if publish:
@@ -95,12 +99,14 @@ def publish_folder(path: Path, app_id: str | None, item_id: str | None, steamcmd
         upload.write_text(workshop_vdf(app_id, item_id, content, notes), encoding="utf-8")
         print(f"Validated {count} files for Steam app {app_id}, existing Workshop item {item_id}")
         print(f"Content SHA256: {fingerprint}")
+        if description is not None:
+            print(f"Description: replaced ({len(description.encode('utf-8'))} bytes)")
         if publish:
             print(f"Upload snapshot: {stage}", flush=True)
             retained = True
             publish_content(content, app_id, item_id, notes, upload, backend=backend,
                             steamcmd_dir=steamcmd_dir, username=username, runtime_dir=runtime_dir, offline=offline,
-                            timeout=timeout)
+                            timeout=timeout, description=description)
             retained = False
             print(f"Published content to existing Workshop item {item_id}")
     finally:
@@ -122,6 +128,7 @@ def main() -> None:
     parser.add_argument("--notes-file", type=Path)
     parser.add_argument("--timeout", type=float, default=180,
                         help="Positive finite seconds to wait for upload confirmation (default: 180)")
+    add_description_argument(parser)
     add_backend_arguments(parser)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--publish", action="store_true")
@@ -131,7 +138,7 @@ def main() -> None:
         notes = args.notes_file.read_bytes().decode("utf-8") if args.notes_file else ""
         publish_folder(args.folder, args.app_id or None, args.item_id or None, args.steamcmd_dir.expanduser(),
                        args.username, notes, args.publish, backend=args.backend, runtime_dir=args.runtime_dir,
-                       offline=args.offline, timeout=args.timeout)
+                       offline=args.offline, timeout=args.timeout, description=read_description(args.description_file))
     except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
         parser.exit(1, f"Publisher stopped: {error}\n")
 

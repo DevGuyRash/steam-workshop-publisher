@@ -45,7 +45,7 @@ Provision once on a connected machine, then copy that cache alongside the same p
 
 ## Upload behavior and failures
 
-The native helper runs under the same Python interpreter in a temporary working directory with the selected application ID. It calls `StartItemUpdate`, `SetItemContent`, and `SubmitItemUpdate`, preserving listing metadata and required items. It does not create items, sign in, switch accounts, restart Steam, or launch a game. It waits for Steam's call result, checks the result and returned item ID, and reports a Workshop agreement requirement separately. Raw native output is withheld, and unrelated GitHub and SteamCMD secrets are excluded from the helper's environment.
+The native helper runs under the same Python interpreter in a temporary working directory with the selected application ID. It calls `StartItemUpdate`, `SetItemContent`, and `SubmitItemUpdate`, preserving listing metadata and required items. With `--description-file` it also calls `SetItemDescription`; the SteamCMD backend writes the same text into a separate build file next to the checked stage, which stays unchanged. It does not create items, sign in, switch accounts, restart Steam, or launch a game. It waits for Steam's call result, checks the result and returned item ID, and reports a Workshop agreement requirement separately. Raw native output is withheld, and unrelated GitHub and SteamCMD secrets are excluded from the helper's environment.
 
 The parent bounds the helper's lifetime. Cancellation or timeout kills and reaps that helper, not the user's Steam process. A received upload can finish independently of the foreground command. There is no unattended credential refresh or automatic resubmission.
 

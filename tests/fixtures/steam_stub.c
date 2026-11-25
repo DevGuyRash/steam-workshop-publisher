@@ -15,14 +15,17 @@ typedef struct { int32_t result; bool legal; uint64_t item; } UpdateResult;
 static int mode, shutdowns, submits, callbacks;
 static uint32_t app;
 static uint64_t item;
-static char content[4096], notes[65537];
-API void test_reset(int value) { mode=value; shutdowns=submits=callbacks=0; app=0; item=0; content[0]=notes[0]=0; }
+static char content[4096], notes[65537], description[8001];
+static int described;
+API void test_reset(int value) { mode=value; shutdowns=submits=callbacks=0; app=0; item=0; content[0]=notes[0]=description[0]=0; described=0; }
 API int test_shutdowns(void) { return shutdowns; }
 API int test_submits(void) { return submits; }
 API uint32_t test_app(void) { return app; }
 API uint64_t test_item(void) { return item; }
 API const char *test_content(void) { return content; }
 API const char *test_notes(void) { return notes; }
+API const char *test_description(void) { return description; }
+API int test_described(void) { return described; }
 API bool SteamAPI_IsSteamRunning(void) { return mode!=1; }
 API int SteamAPI_InitFlat(char *error) { strcpy(error,"private-native-error-canary"); return mode==3 ? 2 : 0; }
 API void SteamAPI_Shutdown(void) { shutdowns++; }
@@ -36,6 +39,9 @@ API uint64_t SteamAPI_ISteamUGC_StartItemUpdate(void *self,uint32_t app_id,uint6
 }
 API bool SteamAPI_ISteamUGC_SetItemContent(void *self,uint64_t handle,const char *value) {
     (void)self; (void)handle; strncpy(content,value,sizeof(content)-1); return mode!=12;
+}
+API bool SteamAPI_ISteamUGC_SetItemDescription(void *self,uint64_t handle,const char *value) {
+    (void)self; (void)handle; described++; strncpy(description,value,sizeof(description)-1); return mode!=13;
 }
 API uint64_t SteamAPI_ISteamUGC_SubmitItemUpdate(void *self,uint64_t handle,const char *value) {
     (void)self; (void)handle; submits++; strncpy(notes,value,sizeof(notes)-1); return mode==5 ? 0 : UINT64_C(9876543212346);

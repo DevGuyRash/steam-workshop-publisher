@@ -159,9 +159,25 @@ def release_notes(data: bytes) -> str:
     return notes
 
 
-def workshop_vdf(app_id: str, item_id: str, content: Path, notes: str) -> str:
+MAX_DESCRIPTION_BYTES = 8000
+
+
+def listing_description(data: bytes) -> str:
+    """Validate a replacement Workshop description: Steam's 8000-byte field, same text rules as notes."""
+    if len(data) > MAX_DESCRIPTION_BYTES:
+        raise ValueError("Workshop description exceeds Steam's 8000-byte limit")
+    if not data.strip():
+        raise ValueError("Workshop description is empty")
+    description = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    vdf_string(description)
+    return description
+
+
+def workshop_vdf(app_id: str, item_id: str, content: Path, notes: str, description: str | None = None) -> str:
     values = {"appid": app_id, "publishedfileid": item_id,
               "contentfolder": str(content), "changenote": notes.replace("\r\n", "\n").replace("\r", "\n")}
+    if description is not None:
+        values["description"] = description
     return '"workshopitem"\n{\n' + "".join(f"  {vdf_string(key)} {vdf_string(value)}\n" for key, value in values.items()) + "}\n"
 
 
@@ -330,6 +346,15 @@ def send_to_steam(vdf_path: Path, item_id: str, steamcmd_dir: Path, username: st
             raise SystemExit(128 + cancelled)
 
 
+def add_description_argument(parser) -> None:
+    parser.add_argument("--description-file", type=Path,
+                        help="UTF-8 text that replaces the Workshop description (at most 8000 bytes). Omit to keep it")
+
+
+def read_description(path: Path | None) -> str | None:
+    return listing_description(path.read_bytes()) if path is not None else None
+
+
 def add_backend_arguments(parser) -> None:
     parser.add_argument("--backend", choices=("auto", "desktop", "steamcmd"),
                         help="auto (default) detects desktop Steam; SteamCMD sign-in requires explicit selection. Overrides WORKSHOP_BACKEND")
@@ -339,15 +364,19 @@ def add_backend_arguments(parser) -> None:
 
 def publish_content(content: Path, app_id: str, item_id: str, notes: str, vdf_path: Path, *,
                     backend: str | None = None, steamcmd_dir: Path | None = None, username: str | None = None,
-                    runtime_dir: Path | None = None, offline: bool = False, timeout: float = 180) -> None:
+                    runtime_dir: Path | None = None, offline: bool = False, timeout: float = 180,
+                    description: str | None = None) -> None:
     timeout = positive_timeout(timeout)
+    if description is not None:
+        description = listing_description(description.encode("utf-8"))
     backend = backend if backend is not None else os.environ.get("WORKSHOP_BACKEND", "auto")
     if backend not in {"auto", "desktop", "steamcmd"}:
         raise ValueError("WORKSHOP_BACKEND must be auto, desktop, or steamcmd")
     if backend in {"auto", "desktop"}:
         from desktop import run
         print("Using the existing desktop Steam session; no separate login or SteamCMD fallback.", flush=True)
-        run(app_id, content=content, item_id=item_id, notes=notes, runtime=runtime_dir, offline=offline, timeout=timeout)
+        run(app_id, content=content, item_id=item_id, notes=notes, runtime=runtime_dir, offline=offline, timeout=timeout,
+            description=description)
         return
     if not sys.platform.startswith("linux"):
         raise ValueError("The SteamCMD backend is Linux-only. Select desktop or use the explicit GitHub workflow")
@@ -359,16 +388,22 @@ def publish_content(content: Path, app_id: str, item_id: str, notes: str, vdf_pa
             raise ValueError("Run just login in your own terminal before explicit SteamCMD publishing")
         username = account_file.read_text(encoding="utf-8").strip()
     print("Using a separate SteamCMD login; this may replace another Steam client or game session.", flush=True)
+    if description is not None:
+        # The checked stage stays as it was; the description travels in its own build file.
+        vdf_path = vdf_path.with_name("upload-description.vdf")
+        vdf_path.write_text(workshop_vdf(app_id, item_id, content, notes, description), encoding="utf-8")
     send_to_steam(vdf_path, item_id, steamcmd_dir, username, timeout=timeout)
 
 
 def upload(stage: Path, steamcmd_dir: Path | None = None, username: str | None = None, *,
-           backend: str | None = None, runtime_dir: Path | None = None, offline: bool = False) -> None:
+           backend: str | None = None, runtime_dir: Path | None = None, offline: bool = False,
+           description: str | None = None) -> None:
     mod, tag = checked_stage(stage)
     latest_release(mod, tag)
     notes = (stage / "release-notes.txt").read_text(encoding="utf-8")
     publish_content(stage / "Contents", mod.app_id, mod.item_id, notes, stage / "upload.vdf", backend=backend,
-                    steamcmd_dir=steamcmd_dir, username=username, runtime_dir=runtime_dir, offline=offline)
+                    steamcmd_dir=steamcmd_dir, username=username, runtime_dir=runtime_dir, offline=offline,
+                    description=description)
     print(f"Published {tag} to existing Workshop item {mod.item_id}")
 
 
@@ -385,13 +420,15 @@ def main() -> None:
     upload_parser.add_argument("--stage", type=Path, required=True)
     upload_parser.add_argument("--steamcmd-dir", type=Path)
     upload_parser.add_argument("--username")
+    add_description_argument(upload_parser)
     add_backend_arguments(upload_parser)
     args = parser.parse_args()
     try:
         if args.command == "prepare":
             prepare(args.source, args.tag, args.archive_sha256, args.notes_sha256, args.out)
         else:
-            upload(args.stage, args.steamcmd_dir, args.username, backend=args.backend, runtime_dir=args.runtime_dir, offline=args.offline)
+            upload(args.stage, args.steamcmd_dir, args.username, backend=args.backend, runtime_dir=args.runtime_dir,
+                   offline=args.offline, description=read_description(args.description_file))
     except (ValueError, KeyError, TypeError, OSError, RuntimeError, zipfile.BadZipFile, subprocess.SubprocessError) as error:
         parser.exit(1, f"Publisher stopped: {error}\n")
 

@@ -200,7 +200,7 @@ class NativeABI(unittest.TestCase):
         if os.name == "nt":
             import _ctypes
             cls.addClassCleanup(_ctypes.FreeLibrary, cls.api._handle)
-        for name, result in (("test_reset", None), ("test_shutdowns", C.c_int), ("test_submits", C.c_int), ("test_app", C.c_uint32), ("test_item", C.c_uint64), ("test_content", C.c_char_p), ("test_notes", C.c_char_p)):
+        for name, result in (("test_reset", None), ("test_shutdowns", C.c_int), ("test_submits", C.c_int), ("test_app", C.c_uint32), ("test_item", C.c_uint64), ("test_content", C.c_char_p), ("test_notes", C.c_char_p), ("test_description", C.c_char_p), ("test_described", C.c_int)):
             function = getattr(cls.api, name)
             function.restype = result
             function.argtypes = [C.c_int] if name == "test_reset" else []
@@ -223,6 +223,24 @@ class NativeABI(unittest.TestCase):
         self.assertEqual(self.api.test_content().decode("utf-8"), str(Path.cwd() / "fixture ü"))
         self.assertEqual(self.api.test_submits(), 1)
         self.assertEqual(self.api.test_shutdowns(), 1)
+        self.assertEqual(self.api.test_described(), 0, "The listing is kept unless a description is given")
+
+    def test_native_description_replaces_listing_text_or_stops_before_submit(self):
+        steam = desktop.Steam(self.library, 440)
+        try:
+            steam.upload(440, 1234, Path.cwd(), "notes", 1, "[h2]Über[/h2]\nLine")
+        finally:
+            steam.close()
+        self.assertEqual(self.api.test_description().decode("utf-8"), "[h2]Über[/h2]\nLine")
+        self.assertEqual((self.api.test_described(), self.api.test_submits()), (1, 1))
+        self.api.test_reset(13)
+        steam = desktop.Steam(self.library, 440)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "description"):
+                steam.upload(440, 1234, Path.cwd(), "notes", 1, "text")
+        finally:
+            steam.close()
+        self.assertEqual(self.api.test_submits(), 0)
 
     def test_native_detection_refuses_unavailable_logins_without_submitting(self):
         for mode, message, shutdowns in ((1, "not running", 0), (2, "not online", 1), (3, "initialization failed", 0), (4, "different application", 1)):

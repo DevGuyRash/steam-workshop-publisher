@@ -110,3 +110,16 @@ class ReleaseNotesContract(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class DescriptionContract(unittest.TestCase):
+    def test_description_limits_and_steamcmd_build_file(self):
+        import publisher
+        self.assertEqual(publisher.listing_description("a\r\nb\rc".encode()), "a\nb\nc")
+        self.assertEqual(len(publisher.listing_description(("é" * 4000).encode())), 4000)
+        for bad in (b"x" * 8001, b"", b"  \n", b"bad\x00", "\ud800".encode("utf-8", "surrogatepass")):
+            with self.subTest(bad=bad[:8]), self.assertRaises((ValueError, UnicodeDecodeError)):
+                publisher.listing_description(bad)
+        vdf = publisher.workshop_vdf("108600", "1", Path("/c"), "n", "[b]New[/b]")
+        self.assertIn('"description" "[b]New[/b]"', vdf)
+        self.assertNotIn("description", publisher.workshop_vdf("108600", "1", Path("/c"), "n"))
