@@ -15,7 +15,7 @@ import time
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from publisher import positive_id, release_notes
+from publisher import listing_description, positive_id, release_notes
 from steam_runtime import install, runtime_root
 
 RESULT_PREFIX = "WORKSHOP_DESKTOP_RESULT="
@@ -65,7 +65,7 @@ class Steam:
     def logged_on(self):
         return self.call("SteamAPI_ISteamUser_BLoggedOn", C.c_bool, [C.c_void_p])(self.user)
 
-    def upload(self, app_id: int, item_id: int, content: Path, notes: str, timeout: float):
+    def upload(self, app_id: int, item_id: int, content: Path, notes: str, timeout: float, description: str | None = None):
         handle = self.call("SteamAPI_ISteamUGC_StartItemUpdate", C.c_uint64,
                            [C.c_void_p, C.c_uint32, C.c_uint64])(self.ugc, app_id, item_id)
         if handle in (0, 2**64 - 1):
@@ -73,6 +73,9 @@ class Steam:
         if not self.call("SteamAPI_ISteamUGC_SetItemContent", C.c_bool,
                          [C.c_void_p, C.c_uint64, C.c_char_p])(self.ugc, handle, str(content).encode("utf-8")):
             raise RuntimeError("Steam refused the content folder")
+        if description is not None and not self.call("SteamAPI_ISteamUGC_SetItemDescription", C.c_bool,
+                [C.c_void_p, C.c_uint64, C.c_char_p])(self.ugc, handle, description.encode("utf-8")):
+            raise RuntimeError("Steam refused the Workshop description")
         call = self.call("SteamAPI_ISteamUGC_SubmitItemUpdate", C.c_uint64,
                          [C.c_void_p, C.c_uint64, C.c_char_p])(self.ugc, handle, notes.encode("utf-8"))
         if call == 0:
@@ -107,7 +110,7 @@ class Steam:
 
 
 def run(app_id: str, *, content: Path | None = None, item_id: str | None = None, notes: str = "",
-        runtime: Path | None = None, offline: bool = False, timeout: float = 180) -> dict:
+        runtime: Path | None = None, offline: bool = False, timeout: float = 180, description: str | None = None) -> dict:
     app_id = positive_id(app_id, 32, "Steam application")
     if content is not None:
         item_id = positive_id(item_id, 64, "Workshop updates")
@@ -115,6 +118,8 @@ def run(app_id: str, *, content: Path | None = None, item_id: str | None = None,
         if not content.is_dir():
             raise ValueError("Choose an existing content directory")
     notes = release_notes(notes.encode("utf-8"))
+    if description is not None:
+        description = listing_description(description.encode("utf-8"))
     root = runtime_root(runtime)
     install(root, offline=offline)
     cancelled = None
@@ -132,7 +137,8 @@ def run(app_id: str, *, content: Path | None = None, item_id: str | None = None,
             (work / "steam_appid.txt").write_text(app_id, encoding="ascii")
             request = work / "request.json"
             request.write_text(json.dumps({"app_id": app_id, "item_id": item_id,
-                "content": str(content) if content is not None else None, "notes": notes, "timeout": timeout}), encoding="utf-8")
+                "content": str(content) if content is not None else None, "notes": notes, "timeout": timeout,
+                "description": description}), encoding="utf-8")
             env = {key: value for key, value in os.environ.items() if key not in {
                 "GH_TOKEN", "GITHUB_TOKEN", "SOURCE_RELEASES_TOKEN", "STEAM_SESSION_KEY", "STEAM_USERNAME",
                 "STEAM_CONFIG_VDF", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES"}}
@@ -181,7 +187,7 @@ def worker(request: Path, runtime: Path):
         steam = Steam(install(runtime, offline=True), app_id)
         if data["content"] is not None:
             item_id = int(positive_id(data["item_id"], 64, "Workshop updates"))
-            steam.upload(app_id, item_id, Path(data["content"]), data["notes"], data["timeout"])
+            steam.upload(app_id, item_id, Path(data["content"]), data["notes"], data["timeout"], data.get("description"))
         result = {"ok": True, "backend": "desktop", "app_id": str(app_id), "uploaded": data["content"] is not None}
         code = 0
     except (ValueError, OSError, RuntimeError, AttributeError) as error:

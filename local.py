@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 
-from publisher import add_backend_arguments, upload
+from publisher import add_backend_arguments, add_description_argument, read_description, upload
 from content_files import regular_stat
 from folder import UPLOAD_ROOT
 from session import LOCAL_ROOT
@@ -20,8 +20,13 @@ def main() -> None:
     parser.add_argument("--publish", action="store_true")
     parser.add_argument("--steamcmd-dir", type=Path, default=LOCAL_ROOT)
     parser.add_argument("--username")
+    add_description_argument(parser)
     add_backend_arguments(parser)
     args = parser.parse_args()
+    try:
+        description = read_description(args.description_file)
+    except (ValueError, OSError) as error:
+        parser.exit(1, f"Publisher stopped: {error}\n")
     root = Path(__file__).resolve().parent
     if args.publish:
         UPLOAD_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -40,7 +45,7 @@ def main() -> None:
             retained = True
             try:
                 upload(stage, args.steamcmd_dir, args.username, backend=args.backend,
-                       runtime_dir=args.runtime_dir, offline=args.offline)
+                       runtime_dir=args.runtime_dir, offline=args.offline, description=description)
             except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
                 parser.exit(1, f"Publisher stopped: {error}\n")
             retained = False
