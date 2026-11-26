@@ -173,6 +173,21 @@ def listing_description(data: bytes) -> str:
     return description
 
 
+MAX_TITLE_BYTES = 128
+
+
+def listing_title(text: str) -> str:
+    """Validate a replacement Workshop title: one line within Steam's 128-byte field."""
+    title = text.strip()
+    if not title:
+        raise ValueError("Workshop title is empty")
+    if len(title.encode("utf-8")) > MAX_TITLE_BYTES:
+        raise ValueError("Workshop title exceeds Steam's 128-byte limit")
+    if any(ord(character) < 32 or ord(character) == 127 for character in title):
+        raise ValueError("Workshop title must be one line without control characters")
+    return title
+
+
 def workshop_vdf(app_id: str, item_id: str, content: Path, notes: str, description: str | None = None) -> str:
     values = {"appid": app_id, "publishedfileid": item_id,
               "contentfolder": str(content), "changenote": notes.replace("\r\n", "\n").replace("\r", "\n")}

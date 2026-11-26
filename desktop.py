@@ -15,7 +15,7 @@ import time
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from publisher import listing_description, positive_id, release_notes
+from publisher import listing_description, listing_title, positive_id, release_notes
 from steam_runtime import install, runtime_root
 
 RESULT_PREFIX = "WORKSHOP_DESKTOP_RESULT="
@@ -25,6 +25,20 @@ class UpdateResult(C.Structure):
     _layout_ = "ms"
     _pack_ = 8 if sys.platform == "win32" else 4
     _fields_ = [("result", C.c_int32), ("legal_required", C.c_bool), ("item_id", C.c_uint64)]
+
+
+class DependencyResult(C.Structure):
+    _layout_ = "ms"
+    _pack_ = UpdateResult._pack_
+    _fields_ = [("result", C.c_int32), ("item_id", C.c_uint64), ("child_id", C.c_uint64)]
+
+
+# Steam's call-result IDs: SubmitItemUpdateResult_t, AddUGCDependencyResult_t, RemoveUGCDependencyResult_t.
+SUBMIT_RESULT, ADD_DEPENDENCY_RESULT, REMOVE_DEPENDENCY_RESULT = 3404, 3412, 3413
+
+FAILURES = {2: "Steam reported a general failure", 8: "the app/item parameters or Workshop configuration are invalid",
+            9: "the item or content was not found", 15: "the current Steam account lacks permission or a game license",
+            16: "Steam timed out", 25: "the Workshop or account limit was exceeded", 33: "Steam could not lock the item"}
 
 
 class Steam:
@@ -65,21 +79,8 @@ class Steam:
     def logged_on(self):
         return self.call("SteamAPI_ISteamUser_BLoggedOn", C.c_bool, [C.c_void_p])(self.user)
 
-    def upload(self, app_id: int, item_id: int, content: Path, notes: str, timeout: float, description: str | None = None):
-        handle = self.call("SteamAPI_ISteamUGC_StartItemUpdate", C.c_uint64,
-                           [C.c_void_p, C.c_uint32, C.c_uint64])(self.ugc, app_id, item_id)
-        if handle in (0, 2**64 - 1):
-            raise RuntimeError("Steam refused the Workshop update handle. Check the app and existing item IDs")
-        if not self.call("SteamAPI_ISteamUGC_SetItemContent", C.c_bool,
-                         [C.c_void_p, C.c_uint64, C.c_char_p])(self.ugc, handle, str(content).encode("utf-8")):
-            raise RuntimeError("Steam refused the content folder")
-        if description is not None and not self.call("SteamAPI_ISteamUGC_SetItemDescription", C.c_bool,
-                [C.c_void_p, C.c_uint64, C.c_char_p])(self.ugc, handle, description.encode("utf-8")):
-            raise RuntimeError("Steam refused the Workshop description")
-        call = self.call("SteamAPI_ISteamUGC_SubmitItemUpdate", C.c_uint64,
-                         [C.c_void_p, C.c_uint64, C.c_char_p])(self.ugc, handle, notes.encode("utf-8"))
-        if call == 0:
-            raise RuntimeError("Steam refused the Workshop upload request")
+    def wait(self, call: int, result: C.Structure, callback: int, timeout: float, what: str):
+        """Wait for one Steam call result, then return it. Never reports success on its own."""
         completed = self.call("SteamAPI_ISteamUtils_IsAPICallCompleted", C.c_bool,
                               [C.c_void_p, C.c_uint64, C.POINTER(C.c_bool)])
         get_result = self.call("SteamAPI_ISteamUtils_GetAPICallResult", C.c_bool,
@@ -89,31 +90,70 @@ class Steam:
         deadline = time.monotonic() + timeout
         while not completed(self.utils, call, C.byref(failed)):
             if time.monotonic() >= deadline:
-                raise RuntimeError("Steam upload timed out. Check the existing item's update time before retrying")
+                raise RuntimeError(f"Steam {what} timed out. Check the existing item before retrying")
             callbacks()
             if not self.logged_on():
-                raise RuntimeError("Steam went offline during upload. Check the existing item before retrying")
+                raise RuntimeError(f"Steam went offline during the {what}. Check the existing item before retrying")
             time.sleep(0.1)
-        result = UpdateResult()
-        received = get_result(self.utils, call, C.byref(result), C.sizeof(result), 3404, C.byref(failed))
+        received = get_result(self.utils, call, C.byref(result), C.sizeof(result), callback, C.byref(failed))
         if not received or failed.value:
-            raise RuntimeError("Steam did not return a valid Workshop upload result. Check the existing item before retrying")
+            raise RuntimeError(f"Steam did not return a valid Workshop {what} result. Check the existing item before retrying")
         if result.result != 1:
-            reason = {2: "Steam reported a general failure", 8: "the app/item parameters or Workshop configuration are invalid",
-                      9: "the item or content was not found", 15: "the current Steam account lacks permission or a game license",
-                      16: "Steam timed out", 25: "the Workshop or account limit was exceeded", 33: "Steam could not lock the item"}.get(result.result, "Steam rejected the update")
-            raise RuntimeError(f"Workshop upload failed (result {result.result}): {reason}")
+            reason = FAILURES.get(result.result, "Steam rejected the request")
+            raise RuntimeError(f"Workshop {what} failed (result {result.result}): {reason}")
+        return result
+
+    def upload(self, app_id: int, item_id: int, content: Path | None, notes: str, timeout: float,
+               description: str | None = None, title: str | None = None):
+        """One item update. Without content it changes only the given listing fields."""
+        handle = self.call("SteamAPI_ISteamUGC_StartItemUpdate", C.c_uint64,
+                           [C.c_void_p, C.c_uint32, C.c_uint64])(self.ugc, app_id, item_id)
+        if handle in (0, 2**64 - 1):
+            raise RuntimeError("Steam refused the Workshop update handle. Check the app and existing item IDs")
+        if content is not None and not self.call("SteamAPI_ISteamUGC_SetItemContent", C.c_bool,
+                [C.c_void_p, C.c_uint64, C.c_char_p])(self.ugc, handle, str(content).encode("utf-8")):
+            raise RuntimeError("Steam refused the content folder")
+        if title is not None and not self.call("SteamAPI_ISteamUGC_SetItemTitle", C.c_bool,
+                [C.c_void_p, C.c_uint64, C.c_char_p])(self.ugc, handle, title.encode("utf-8")):
+            raise RuntimeError("Steam refused the Workshop title")
+        if description is not None and not self.call("SteamAPI_ISteamUGC_SetItemDescription", C.c_bool,
+                [C.c_void_p, C.c_uint64, C.c_char_p])(self.ugc, handle, description.encode("utf-8")):
+            raise RuntimeError("Steam refused the Workshop description")
+        call = self.call("SteamAPI_ISteamUGC_SubmitItemUpdate", C.c_uint64,
+                         [C.c_void_p, C.c_uint64, C.c_char_p])(self.ugc, handle, notes.encode("utf-8"))
+        if call == 0:
+            raise RuntimeError("Steam refused the Workshop upload request")
+        result = self.wait(call, UpdateResult(), SUBMIT_RESULT, timeout, "upload")
         if result.item_id != item_id:
             raise RuntimeError("Steam confirmed a different item ID; inspect Workshop before retrying")
         if result.legal_required:
             raise RuntimeError("Steam received the update but requires the current account to accept the Workshop agreement at https://steamcommunity.com/sharedfiles/workshoplegalagreement")
 
+    def dependency(self, item_id: int, child_id: int, add: bool, timeout: float):
+        """Add or remove one required item, and confirm Steam changed that exact pair."""
+        name = "SteamAPI_ISteamUGC_AddDependency" if add else "SteamAPI_ISteamUGC_RemoveDependency"
+        call = self.call(name, C.c_uint64, [C.c_void_p, C.c_uint64, C.c_uint64])(self.ugc, item_id, child_id)
+        if call == 0:
+            raise RuntimeError("Steam refused the required-item change")
+        what = "required-item " + ("addition" if add else "removal")
+        result = self.wait(call, DependencyResult(), ADD_DEPENDENCY_RESULT if add else REMOVE_DEPENDENCY_RESULT, timeout, what)
+        if (result.item_id, result.child_id) != (item_id, child_id):
+            raise RuntimeError("Steam confirmed a different required-item change; inspect Workshop before retrying")
+
 
 def run(app_id: str, *, content: Path | None = None, item_id: str | None = None, notes: str = "",
-        runtime: Path | None = None, offline: bool = False, timeout: float = 180, description: str | None = None) -> dict:
+        runtime: Path | None = None, offline: bool = False, timeout: float = 180, description: str | None = None,
+        title: str | None = None, require: tuple[str, ...] = (), unrequire: tuple[str, ...] = ()) -> dict:
     app_id = positive_id(app_id, 32, "Steam application")
-    if content is not None:
+    if title is not None:
+        title = listing_title(title)
+    require = [positive_id(child, 64, "Required items") for child in require]
+    unrequire = [positive_id(child, 64, "Required items") for child in unrequire]
+    if set(require) & set(unrequire):
+        raise ValueError("An item cannot be both added and removed as required")
+    if content is not None or title is not None or description is not None or require or unrequire:
         item_id = positive_id(item_id, 64, "Workshop updates")
+    if content is not None:
         content = content.resolve(strict=True)
         if not content.is_dir():
             raise ValueError("Choose an existing content directory")
@@ -138,7 +178,7 @@ def run(app_id: str, *, content: Path | None = None, item_id: str | None = None,
             request = work / "request.json"
             request.write_text(json.dumps({"app_id": app_id, "item_id": item_id,
                 "content": str(content) if content is not None else None, "notes": notes, "timeout": timeout,
-                "description": description}), encoding="utf-8")
+                "description": description, "title": title, "require": require, "unrequire": unrequire}), encoding="utf-8")
             env = {key: value for key, value in os.environ.items() if key not in {
                 "GH_TOKEN", "GITHUB_TOKEN", "SOURCE_RELEASES_TOKEN", "STEAM_SESSION_KEY", "STEAM_USERNAME",
                 "STEAM_CONFIG_VDF", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES"}}
@@ -185,10 +225,19 @@ def worker(request: Path, runtime: Path):
         data = json.loads(request.read_text(encoding="utf-8"))
         app_id = int(positive_id(data["app_id"], 32, "Steam application"))
         steam = Steam(install(runtime, offline=True), app_id)
-        if data["content"] is not None:
+        content, title, description = data["content"], data.get("title"), data.get("description")
+        changes = {"require": data.get("require") or [], "unrequire": data.get("unrequire") or []}
+        if content is not None or title is not None or description is not None or changes["require"] or changes["unrequire"]:
             item_id = int(positive_id(data["item_id"], 64, "Workshop updates"))
-            steam.upload(app_id, item_id, Path(data["content"]), data["notes"], data["timeout"], data.get("description"))
-        result = {"ok": True, "backend": "desktop", "app_id": str(app_id), "uploaded": data["content"] is not None}
+            if content is not None or title is not None or description is not None:
+                steam.upload(app_id, item_id, Path(content) if content is not None else None, data["notes"], data["timeout"],
+                             description, title)
+            for child in changes["unrequire"]:
+                steam.dependency(item_id, int(child), False, data["timeout"])
+            for child in changes["require"]:
+                steam.dependency(item_id, int(child), True, data["timeout"])
+        result = {"ok": True, "backend": "desktop", "app_id": str(app_id), "uploaded": content is not None,
+                  "listing": title is not None or description is not None, **changes}
         code = 0
     except (ValueError, OSError, RuntimeError, AttributeError) as error:
         result, code = {"ok": False, "error": str(error)}, 1
@@ -206,9 +255,17 @@ def main():
     probe.add_argument("--app-id", required=True)
     probe.add_argument("--offline", action="store_true", help="Use only the cached runtime; Steam itself must still be online")
     setup = commands.add_parser("install-runtime", help="Cache the pinned runtime without accessing Steam")
+    listing = commands.add_parser("listing", help="Change an existing item's title, description or required items without uploading content")
+    listing.add_argument("--app-id", required=True)
+    listing.add_argument("--item-id", required=True)
+    listing.add_argument("--title", help="Replacement title, one line of at most 128 bytes")
+    listing.add_argument("--description-file", type=Path, help="UTF-8 text that replaces the description")
+    listing.add_argument("--require", action="append", default=[], metavar="ITEM_ID", help="Add a required Workshop item; repeatable")
+    listing.add_argument("--unrequire", action="append", default=[], metavar="ITEM_ID", help="Remove a required Workshop item; repeatable")
+    listing.add_argument("--offline", action="store_true", help="Use only the cached runtime; Steam itself must still be online")
     internal = commands.add_parser("_worker", help=argparse.SUPPRESS)
     internal.add_argument("--request", type=Path, required=True)
-    for command in (probe, setup, internal):
+    for command in (probe, setup, listing, internal):
         command.add_argument("--runtime-dir", type=Path)
     args = parser.parse_args()
     if args.command == "_worker":
@@ -216,6 +273,15 @@ def main():
     try:
         if args.command == "install-runtime":
             print(install(runtime_root(args.runtime_dir)))
+        elif args.command == "listing":
+            description = args.description_file.read_text(encoding="utf-8") if args.description_file else None
+            if args.title is None and description is None and not args.require and not args.unrequire:
+                parser.error("listing needs --title, --description-file, --require or --unrequire")
+            result = run(args.app_id, item_id=args.item_id, runtime=args.runtime_dir, offline=args.offline,
+                         description=description, title=args.title, require=tuple(args.require), unrequire=tuple(args.unrequire))
+            changed = [name for name, done in (("title", args.title is not None), ("description", description is not None)) if done]
+            changed += [f"required +{child}" for child in result["require"]] + [f"required -{child}" for child in result["unrequire"]]
+            print(f"Updated Workshop item {args.item_id}: {', '.join(changed)}. No content was uploaded")
         else:
             run(args.app_id, runtime=args.runtime_dir, offline=args.offline)
             print(f"Desktop Steam is online and ready for app {args.app_id}. No upload or separate login was attempted")

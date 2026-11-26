@@ -1,6 +1,8 @@
 """Portable CLI, backend, filesystem and native ABI checks. Never upload to real Steam."""
 
+import contextlib
 import ctypes as C
+import io
 import hashlib
 import json
 import os
@@ -200,7 +202,7 @@ class NativeABI(unittest.TestCase):
         if os.name == "nt":
             import _ctypes
             cls.addClassCleanup(_ctypes.FreeLibrary, cls.api._handle)
-        for name, result in (("test_reset", None), ("test_shutdowns", C.c_int), ("test_submits", C.c_int), ("test_app", C.c_uint32), ("test_item", C.c_uint64), ("test_content", C.c_char_p), ("test_notes", C.c_char_p), ("test_description", C.c_char_p), ("test_described", C.c_int)):
+        for name, result in (("test_reset", None), ("test_shutdowns", C.c_int), ("test_submits", C.c_int), ("test_app", C.c_uint32), ("test_item", C.c_uint64), ("test_content", C.c_char_p), ("test_notes", C.c_char_p), ("test_description", C.c_char_p), ("test_described", C.c_int), ("test_title", C.c_char_p), ("test_titled", C.c_int), ("test_contented", C.c_int), ("test_added", C.c_int), ("test_removed", C.c_int), ("test_removed_child", C.c_uint64), ("test_added_child", C.c_uint64), ("test_dependency_parent", C.c_uint64)):
             function = getattr(cls.api, name)
             function.restype = result
             function.argtypes = [C.c_int] if name == "test_reset" else []
@@ -241,6 +243,44 @@ class NativeABI(unittest.TestCase):
         finally:
             steam.close()
         self.assertEqual(self.api.test_submits(), 0)
+
+    def test_native_listing_update_changes_title_without_content(self):
+        steam = desktop.Steam(self.library, 440)
+        try:
+            steam.upload(440, 1234, None, "", 1, None, "Second Ünder - Title")
+        finally:
+            steam.close()
+        self.assertEqual(self.api.test_title().decode("utf-8"), "Second Ünder - Title")
+        self.assertEqual((self.api.test_titled(), self.api.test_contented(), self.api.test_described(), self.api.test_submits()), (1, 0, 0, 1),
+                         "A listing edit sends no content and keeps the description")
+        self.api.test_reset(14)
+        steam = desktop.Steam(self.library, 440)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "title"):
+                steam.upload(440, 1234, None, "", 1, None, "Title")
+        finally:
+            steam.close()
+        self.assertEqual(self.api.test_submits(), 0, "A refused title stops before anything is submitted")
+
+    def test_native_required_items_are_added_and_removed_exactly(self):
+        steam = desktop.Steam(self.library, 440)
+        try:
+            steam.dependency(12345678901234, 3403870858, False, 1)
+            steam.dependency(12345678901234, 777, True, 1)
+        finally:
+            steam.close()
+        self.assertEqual((self.api.test_removed(), self.api.test_removed_child()), (1, 3403870858))
+        self.assertEqual((self.api.test_added(), self.api.test_added_child()), (1, 777))
+        self.assertEqual(self.api.test_dependency_parent(), 12345678901234)
+        self.assertEqual(self.api.test_submits(), 0, "Required items change without an item update")
+        for mode, message in ((15, "refused"), (16, "permission"), (17, "different required-item"), (10, "timed out")):
+            self.api.test_reset(mode)
+            steam = desktop.Steam(self.library, 440)
+            try:
+                with self.subTest(mode=mode), self.assertRaisesRegex(RuntimeError, message):
+                    steam.dependency(1234, 99, False, 0.01)
+            finally:
+                steam.close()
 
     def test_native_detection_refuses_unavailable_logins_without_submitting(self):
         for mode, message, shutdowns in ((1, "not running", 0), (2, "not online", 1), (3, "initialization failed", 0), (4, "different application", 1)):
@@ -311,3 +351,44 @@ class ProcessAndRuntime(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ListingEdits(unittest.TestCase):
+    def test_titles_and_required_items_are_checked_before_steam(self):
+        import publisher
+        self.assertEqual(publisher.listing_title("  Second Nature - Autopilot [B42] "), "Second Nature - Autopilot [B42]")
+        for bad in ("", "   ", "a\nb", "x" * 129, "é" * 65):
+            with self.subTest(title=bad), self.assertRaises(ValueError):
+                publisher.listing_title(bad)
+        with patch.object(desktop, "install") as install, self.assertRaisesRegex(ValueError, "both added and removed"):
+            desktop.run("108600", item_id="1", require=("5",), unrequire=("5",))
+        install.assert_not_called()
+        with patch.object(desktop, "install") as install, self.assertRaises(ValueError):
+            desktop.run("108600", title="Title")
+        install.assert_not_called()
+
+    def test_worker_sends_listing_changes_without_content(self):
+        calls = []
+        class FakeSteam:
+            def __init__(self, library, app_id): calls.append(("init", app_id))
+            def upload(self, *args): calls.append(("upload",) + args)
+            def dependency(self, *args): calls.append(("dependency",) + args)
+            def close(self): calls.append(("close",))
+        with tempfile.TemporaryDirectory() as temporary:
+            request = Path(temporary) / "request.json"
+            request.write_text(json.dumps({"app_id": "108600", "item_id": "3837554362", "content": None, "notes": "",
+                "timeout": 5, "description": None, "title": "Second Nature", "require": ["11"], "unrequire": ["3403870858"]}))
+            out = io.StringIO()
+            with patch.object(desktop, "Steam", FakeSteam), patch.object(desktop, "install"), contextlib.redirect_stdout(out):
+                self.assertEqual(desktop.worker(request, Path(temporary)), 0)
+        self.assertEqual(calls[1], ("upload", 108600, 3837554362, None, "", 5, None, "Second Nature"))
+        self.assertEqual(calls[2:4], [("dependency", 3837554362, 3403870858, False, 5), ("dependency", 3837554362, 11, True, 5)],
+                         "Removals first, then additions")
+        result = json.loads(out.getvalue().strip().removeprefix(desktop.RESULT_PREFIX))
+        self.assertEqual((result["ok"], result["uploaded"], result["listing"], result["unrequire"]), (True, False, True, ["3403870858"]))
+
+    def test_listing_command_needs_something_to_change(self):
+        result = subprocess.run([sys.executable, str(ROOT / "desktop.py"), "listing", "--app-id", "108600", "--item-id", "1"],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("needs --title", result.stderr)

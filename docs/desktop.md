@@ -47,6 +47,16 @@ Provision once on a connected machine, then copy that cache alongside the same p
 
 The native helper runs under the same Python interpreter in a temporary working directory with the selected application ID. It calls `StartItemUpdate`, `SetItemContent`, and `SubmitItemUpdate`, preserving listing metadata and required items. With `--description-file` it also calls `SetItemDescription`; the SteamCMD backend writes the same text into a separate build file next to the checked stage, which stays unchanged. It does not create items, sign in, switch accounts, restart Steam, or launch a game. It waits for Steam's call result, checks the result and returned item ID, and reports a Workshop agreement requirement separately. Raw native output is withheld, and unrelated GitHub and SteamCMD secrets are excluded from the helper's environment.
 
+## Edit a listing without uploading
+
+`desktop.py listing` changes an existing item's title, description or required items through the same desktop session, without uploading content:
+
+```sh
+python3 desktop.py listing --app-id 108600 --item-id 1234567890 --title "New title" --description-file description.txt --unrequire 987654321 --require 555555555
+```
+
+Give any of `--title` (one line of at most 128 bytes), `--description-file`, and repeatable `--require ITEM_ID` / `--unrequire ITEM_ID`. Title and description go in one item update (`SetItemTitle`, `SetItemDescription`, `SubmitItemUpdate`) with no `SetItemContent`. Required items change through `RemoveDependency` and then `AddDependency`, one confirmed call result per item; Steam must report the same parent and child for each. The SteamCMD backend has no equivalent, so listing edits are desktop-only.
+
 The parent bounds the helper's lifetime. Cancellation or timeout kills and reaps that helper, not the user's Steam process. A received upload can finish independently of the foreground command. There is no unattended credential refresh or automatic resubmission.
 
 Folder and local release uploads keep their checked content in private directories under `~/.local/share/steam-workshop-publisher/uploads/`. Folder snapshots use `upload-*`; local release snapshots use `release-*` and contain the checked `stage` directory. Confirmed success removes that snapshot. Preparation failures and dry runs also remove their snapshots. If an upload attempt fails, times out, or is interrupted, the command prints the exact snapshot path and retains its files because Steam may still read them after the helper exits. The local release command also reports the exact checked-stage path. Leave a retained snapshot unchanged while the upload is pending. Check the item's update time and Steam's upload status before retrying or removing that directory. A retained snapshot does not establish that Steam accepted an upload.
